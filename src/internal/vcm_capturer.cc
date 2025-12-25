@@ -17,11 +17,12 @@
 #include "modules/video_capture/video_capture_factory.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/ref_counted_object.h"
 
 namespace webrtc {
 namespace internal {
 
-VcmCapturer::VcmCapturer(webrtc::Thread* worker_thread)
+VcmCapturer::VcmCapturer(rtc::Thread* worker_thread)
     : vcm_(nullptr), worker_thread_(worker_thread) {}
 
 bool VcmCapturer::Init(size_t width, size_t height, size_t target_fps,
@@ -56,7 +57,7 @@ bool VcmCapturer::Init(size_t width, size_t height, size_t target_fps,
   return true;
 }
 
-std::shared_ptr<VcmCapturer> VcmCapturer::Create(webrtc::Thread* worker_thread,
+std::shared_ptr<VcmCapturer> VcmCapturer::Create(rtc::Thread* worker_thread,
                                                  size_t width, size_t height,
                                                  size_t target_fps,
                                                  size_t capture_device_index) {
@@ -111,7 +112,7 @@ void VcmCapturer::OnFrame(const VideoFrame& frame) {
 }
 
 webrtc::scoped_refptr<CapturerTrackSource> CapturerTrackSource::Create(
-    webrtc::Thread* worker_thread) {
+    rtc::Thread* worker_thread) {
   const size_t kWidth = 640;
   const size_t kHeight = 480;
   const size_t kFps = 30;
@@ -126,7 +127,7 @@ webrtc::scoped_refptr<CapturerTrackSource> CapturerTrackSource::Create(
     capturer = VcmCapturer::Create(worker_thread, kWidth, kHeight, kFps, i);
     if (capturer) {
       return webrtc::scoped_refptr<CapturerTrackSource>(
-          new webrtc::RefCountedObject<CapturerTrackSource>(capturer));
+          new rtc::RefCountedObject<CapturerTrackSource>(capturer));
     }
   }
 
@@ -135,3 +136,4 @@ webrtc::scoped_refptr<CapturerTrackSource> CapturerTrackSource::Create(
 
 }  // namespace internal
 }  // namespace webrtc
+

@@ -9,6 +9,7 @@
 #include "modules/desktop_capture/win/window_capture_utils.h"
 #endif
 #include "api/scoped_refptr.h"
+#include "api/make_ref_counted.h"
 #include "api/video/i420_buffer.h"
 #include "api/video/video_frame.h"
 #include "api/video/video_source_interface.h"
@@ -33,7 +34,7 @@ class ScreenCapturerTrackSource : public webrtc::VideoTrackSource {
   static webrtc::scoped_refptr<ScreenCapturerTrackSource> Create(
       scoped_refptr<RTCDesktopCapturer> capturer) {
     if (capturer) {
-      return webrtc::make_ref_counted<ScreenCapturerTrackSource>(capturer);
+      return rtc::make_ref_counted<ScreenCapturerTrackSource>(capturer);
     }
     return nullptr;
   }
@@ -44,7 +45,7 @@ class ScreenCapturerTrackSource : public webrtc::VideoTrackSource {
   virtual ~ScreenCapturerTrackSource() { capturer_->Stop(); }
 
  private:
-  webrtc::VideoSourceInterface<webrtc::VideoFrame>* source() override {
+  rtc::VideoSourceInterface<webrtc::VideoFrame>* source() override {
     return static_cast<RTCDesktopCapturerImpl*>(capturer_.get());
   }
 

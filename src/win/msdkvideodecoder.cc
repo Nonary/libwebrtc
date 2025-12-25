@@ -7,8 +7,10 @@
 #include "api/scoped_refptr.h"
 #include "mfxadapter.h"
 #include "msdkvideobase.h"
+#include "modules/video_coding/include/video_error_codes.h"
 #include "src/win/d3d11_allocator.h"
 #include "src/win/nativehandlebuffer.h"
+#include "rtc_base/ref_counted_object.h"
 
 using namespace rtc;
 
@@ -37,9 +39,9 @@ int32_t MSDKVideoDecoder::Release() {
 MSDKVideoDecoder::MSDKVideoDecoder()
     : width_(0),
       height_(0)
-      //,decoder_thread_(new webrtc::Thread(webrtc::SocketServer::CreateDefault()))
+      //,decoder_thread_(new rtc::Thread(webrtc::SocketServer::CreateDefault()))
       ,
-      decoder_thread_(webrtc::Thread::Create()) {
+      decoder_thread_(rtc::Thread::Create()) {
   decoder_thread_->SetName("MSDKVideoDecoderThread", nullptr);
   RTC_CHECK(decoder_thread_->Start())
       << "Failed to start MSDK video decoder thread";
@@ -63,7 +65,7 @@ MSDKVideoDecoder::~MSDKVideoDecoder() {
 
 void MSDKVideoDecoder::CheckOnCodecThread() {
   RTC_CHECK(decoder_thread_.get() ==
-            webrtc::ThreadManager::Instance()->CurrentThread())
+            rtc::ThreadManager::Instance()->CurrentThread())
       << "Running on wrong thread!";
 }
 
@@ -98,14 +100,17 @@ bool MSDKVideoDecoder::CreateD3D11Device() {
   }
   mfxU32 adapter_idx = adapters.Adapters[0].Number;
 
-  hr = CreateDXGIFactory(__uuidof(IDXGIFactory2), (void**)(&m_pdxgi_factory_));
+  hr = CreateDXGIFactory(
+      __uuidof(IDXGIFactory2),
+      reinterpret_cast<void**>(m_pdxgi_factory_.GetAddressOf()));
   if (FAILED(hr)) {
     RTC_LOG(LS_ERROR)
         << "Failed to create dxgi factory for adatper enumeration.";
     return false;
   }
 
-  hr = m_pdxgi_factory_->EnumAdapters(adapter_idx, &m_padapter_);
+  hr = m_pdxgi_factory_->EnumAdapters(
+      adapter_idx, m_padapter_.ReleaseAndGetAddressOf());
   if (FAILED(hr)) {
     RTC_LOG(LS_ERROR) << "Failed to enum adapter for specified adapter index.";
     return false;
@@ -114,7 +119,7 @@ bool MSDKVideoDecoder::CreateD3D11Device() {
   // On DG1 this setting driver type to hardware will result-in device
   // creation failure.
   hr = D3D11CreateDevice(
-      m_padapter_, D3D_DRIVER_TYPE_UNKNOWN, nullptr, 0, feature_levels,
+      m_padapter_.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr, 0, feature_levels,
       sizeof(feature_levels) / sizeof(feature_levels[0]), D3D11_SDK_VERSION,
       &d3d11_device_, &feature_levels_out, &d3d11_device_context_);
   if (FAILED(hr)) {
@@ -139,8 +144,8 @@ bool MSDKVideoDecoder::CreateD3D11Device() {
   }
   // Turn on multi-threading for the context
   {
-    CComQIPtr<ID3D10Multithread> p_mt(d3d11_device_);
-    if (p_mt) {
+    Microsoft::WRL::ComPtr<ID3D10Multithread> p_mt;
+    if (d3d11_device_ && SUCCEEDED(d3d11_device_.As(&p_mt)) && p_mt) {
       p_mt->SetMultithreadProtected(true);
     }
   }
@@ -159,7 +164,7 @@ bool MSDKVideoDecoder::Configure(const Settings& settings) {
 
   // return decoder_thread_->Invoke<int32_t>(RTC_FROM_HERE,
   //    Bind(&MSDKVideoDecoder::InitDecodeOnCodecThread, this));
-  return decoder_thread_->Invoke<bool>(RTC_FROM_HERE, [this] {
+  return decoder_thread_->BlockingCall([this] {
     return InitDecodeOnCodecThread() == WEBRTC_VIDEO_CODEC_OK;
   });
 }
@@ -215,10 +220,11 @@ int32_t MSDKVideoDecoder::InitDecodeOnCodecThread() {
     }
 
     mfxHandleType handle_type = MFX_HANDLE_D3D11_DEVICE;
-    m_mfx_session_->SetHandle(handle_type, d3d11_device_.p);
+    m_mfx_session_->SetHandle(handle_type, d3d11_device_.Get());
 
     // Allocate and initalize the D3D11 frame allocator with current device.
-    m_pmfx_allocator_ = MSDKFactory::CreateD3D11FrameAllocator(d3d11_device_.p);
+    m_pmfx_allocator_ =
+        MSDKFactory::CreateD3D11FrameAllocator(d3d11_device_.Get());
     if (nullptr == m_pmfx_allocator_) {
       return WEBRTC_VIDEO_CODEC_ERROR;
     }
@@ -381,7 +387,7 @@ dec_header:
 
 #endif
         if (callback_) {
-          surface_handle_->d3d11_device = d3d11_device_.p;
+          surface_handle_->d3d11_device = d3d11_device_.Get();
           surface_handle_->texture =
               reinterpret_cast<ID3D11Texture2D*>(pair.first);
           // Texture_array_index not used when decoding with MSDK.
@@ -392,14 +398,15 @@ dec_header:
           // TODO(johny): we should extend the buffer structure to include
           // not only the CropW|CropH value, but also the CropX|CropY for the
           // renderer to correctly setup the video processor input view.
-          webrtc::scoped_refptr<owt::base::NativeHandleBuffer> buffer =
-              new webrtc::RefCountedObject<owt::base::NativeHandleBuffer>(
-                  (void*)surface_handle_.get(), frame_info.CropW,
-                  frame_info.CropH);
-          webrtc::VideoFrame decoded_frame(buffer, inputImage.Timestamp(), 0,
-                                           webrtc::kVideoRotation_0);
-          decoded_frame.set_ntp_time_ms(inputImage.ntp_time_ms_);
-          decoded_frame.set_timestamp(inputImage.Timestamp());
+          auto buffer = rtc::make_ref_counted<owt::base::NativeHandleBuffer>(
+              (void*)surface_handle_.get(), frame_info.CropW, frame_info.CropH);
+          webrtc::VideoFrame decoded_frame =
+              webrtc::VideoFrame::Builder()
+                  .set_video_frame_buffer(buffer)
+                  .set_rotation(webrtc::kVideoRotation_0)
+                  .set_rtp_timestamp(inputImage.RtpTimestamp())
+                  .set_ntp_time_ms(inputImage.ntp_time_ms_)
+                  .build();
           callback_->Decoded(decoded_frame);
         }
       }
@@ -504,3 +511,4 @@ const char* MSDKVideoDecoder::ImplementationName() const {
 
 }  // namespace base
 }  // namespace owt
+

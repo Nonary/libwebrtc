@@ -129,13 +129,13 @@ mfxStatus D3DFrameAllocator::Init(mfxAllocatorParams* pParams) {
 mfxStatus D3DFrameAllocator::Close() {
   if (m_manager && m_hDecoder) {
     m_manager->CloseDeviceHandle(m_hDecoder);
-    m_manager = 0;
+    m_manager.Reset();
     m_hDecoder = 0;
   }
 
   if (m_manager && m_hProcessor) {
     m_manager->CloseDeviceHandle(m_hProcessor);
-    m_manager = 0;
+    m_manager.Reset();
     m_hProcessor = 0;
   }
 
@@ -318,23 +318,25 @@ mfxStatus D3DFrameAllocator::AllocImpl(mfxFrameAllocRequest* request,
       hr = m_manager->OpenDeviceHandle(&m_hProcessor);
       if (FAILED(hr)) return MFX_ERR_MEMORY_ALLOC;
 
-      hr = m_manager->GetVideoService(m_hProcessor,
-                                      IID_IDirectXVideoProcessorService,
-                                      (void**)&m_processorService);
+      hr = m_manager->GetVideoService(
+          m_hProcessor, IID_IDirectXVideoProcessorService,
+          reinterpret_cast<void**>(
+              m_processorService.ReleaseAndGetAddressOf()));
       if (FAILED(hr)) return MFX_ERR_MEMORY_ALLOC;
     }
-    videoService = m_processorService;
+    videoService = m_processorService.Get();
   } else {
     if (!m_hDecoder) {
       hr = m_manager->OpenDeviceHandle(&m_hDecoder);
       if (FAILED(hr)) return MFX_ERR_MEMORY_ALLOC;
 
-      hr = m_manager->GetVideoService(m_hDecoder,
-                                      IID_IDirectXVideoDecoderService,
-                                      (void**)&m_decoderService);
+      hr = m_manager->GetVideoService(
+          m_hDecoder, IID_IDirectXVideoDecoderService,
+          reinterpret_cast<void**>(
+              m_decoderService.ReleaseAndGetAddressOf()));
       if (FAILED(hr)) return MFX_ERR_MEMORY_ALLOC;
     }
-    videoService = m_decoderService;
+    videoService = m_decoderService.Get();
   }
 
   mfxHDLPair** dxMidPtrs =

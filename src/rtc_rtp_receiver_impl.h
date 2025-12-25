@@ -29,7 +29,7 @@ class RTCRtpReceiverImpl : public RTCRtpReceiver,
   webrtc::scoped_refptr<webrtc::RtpReceiverInterface> rtp_receiver_;
   RTCRtpReceiverObserver* observer_;
 
-  virtual void OnFirstPacketReceived(webrtc::MediaType media_type) override;
+  virtual void OnFirstPacketReceived(cricket::MediaType media_type) override;
 
 };  // namespace libwebrtc
 

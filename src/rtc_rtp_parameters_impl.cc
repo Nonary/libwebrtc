@@ -1,5 +1,7 @@
 #include "rtc_rtp_parameters_impl.h"
 
+#include "internal/media_type_utils.h"
+
 #include "base/refcountedobject.h"
 
 namespace libwebrtc {
@@ -352,11 +354,11 @@ void RTCRtpCodecParametersImpl::set_name(const string name) {
 }
 
 RTCMediaType RTCRtpCodecParametersImpl::kind() {
-  return static_cast<RTCMediaType>(rtp_codec_parameters_.kind);
+  return ToRTCMediaType(rtp_codec_parameters_.kind);
 }
 
 void RTCRtpCodecParametersImpl::set_kind(RTCMediaType value) {
-  rtp_codec_parameters_.kind = static_cast<webrtc::MediaType>(value);
+  rtp_codec_parameters_.kind = ToCricketMediaType(value);
 }
 
 int RTCRtpCodecParametersImpl::payload_type() {

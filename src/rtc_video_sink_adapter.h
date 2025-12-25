@@ -9,7 +9,7 @@
 
 namespace libwebrtc {
 
-class VideoSinkAdapter : public webrtc::VideoSinkInterface<webrtc::VideoFrame>,
+class VideoSinkAdapter : public rtc::VideoSinkInterface<webrtc::VideoFrame>,
                          public RefCountInterface {
  public:
   VideoSinkAdapter(webrtc::scoped_refptr<webrtc::VideoTrackInterface> track);
@@ -22,10 +22,10 @@ class VideoSinkAdapter : public webrtc::VideoSinkInterface<webrtc::VideoFrame>,
       RTCVideoRenderer<scoped_refptr<RTCVideoFrame>>* renderer);
 
   virtual void AddRenderer(
-      webrtc::VideoSinkInterface<webrtc::VideoFrame>* renderer);
+      rtc::VideoSinkInterface<webrtc::VideoFrame>* renderer);
 
   virtual void RemoveRenderer(
-      webrtc::VideoSinkInterface<webrtc::VideoFrame>* renderer);
+      rtc::VideoSinkInterface<webrtc::VideoFrame>* renderer);
 
  protected:
   // VideoSinkInterface implementation
@@ -38,3 +38,4 @@ class VideoSinkAdapter : public webrtc::VideoSinkInterface<webrtc::VideoFrame>,
 }  // namespace libwebrtc
 
 #endif  // LIB_WEBRTC_VIDEO_SINK_ADPTER_HXX
+

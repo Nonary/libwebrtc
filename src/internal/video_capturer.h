@@ -25,7 +25,7 @@
 namespace webrtc {
 namespace internal {
 
-class VideoCapturer : public webrtc::VideoSourceInterface<VideoFrame> {
+class VideoCapturer : public rtc::VideoSourceInterface<VideoFrame> {
  public:
   VideoCapturer();
   virtual ~VideoCapturer();
@@ -36,21 +36,22 @@ class VideoCapturer : public webrtc::VideoSourceInterface<VideoFrame> {
 
   virtual void StopCapture() {}
 
-  void AddOrUpdateSink(webrtc::VideoSinkInterface<VideoFrame>* sink,
-                       const webrtc::VideoSinkWants& wants) override;
-  void RemoveSink(webrtc::VideoSinkInterface<VideoFrame>* sink) override;
+  void AddOrUpdateSink(rtc::VideoSinkInterface<VideoFrame>* sink,
+                       const rtc::VideoSinkWants& wants) override;
+  void RemoveSink(rtc::VideoSinkInterface<VideoFrame>* sink) override;
 
  protected:
   void OnFrame(const VideoFrame& frame);
-  webrtc::VideoSinkWants GetSinkWants();
+  rtc::VideoSinkWants GetSinkWants();
 
  private:
   void UpdateVideoAdapter();
 
-  webrtc::VideoBroadcaster broadcaster_;
-  webrtc::VideoAdapter video_adapter_;
+  rtc::VideoBroadcaster broadcaster_;
+  cricket::VideoAdapter video_adapter_;
 };
 }  // namespace internal
 }  // namespace webrtc
 
 #endif  // INTERNAL_VIDEO_CAPTURER_H_
+

@@ -30,8 +30,8 @@
 namespace libwebrtc {
 
 RTCDesktopMediaListImpl::RTCDesktopMediaListImpl(DesktopType type,
-                                                 webrtc::Thread* signaling_thread)
-    : thread_(webrtc::Thread::Create()),
+                                                 rtc::Thread* signaling_thread)
+    : thread_(rtc::Thread::Create()),
       type_(type),
       signaling_thread_(signaling_thread) {
   RTC_DCHECK(thread_);
@@ -253,3 +253,4 @@ void MediaSourceImpl::SaveCaptureResult(
 }
 
 }  // namespace libwebrtc
+

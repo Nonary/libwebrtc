@@ -8,7 +8,8 @@
 
 #include "absl/strings/match.h"
 #include "media/base/codec.h"
-#include "modules/video_coding/codecs/av1/libaom_av1_decoder.h"
+#include "media/base/media_constants.h"
+#include "modules/video_coding/codecs/av1/dav1d_decoder.h"
 #include "modules/video_coding/codecs/h264/include/h264.h"
 #include "modules/video_coding/codecs/vp8/include/vp8.h"
 #include "modules/video_coding/codecs/vp9/include/vp9.h"
@@ -56,8 +57,20 @@ MSDKVideoDecoderFactory::MSDKVideoDecoderFactory() {
 
 MSDKVideoDecoderFactory::~MSDKVideoDecoderFactory() {}
 
-std::unique_ptr<webrtc::VideoDecoder>
-MSDKVideoDecoderFactory::CreateVideoDecoder(
+webrtc::VideoDecoderFactory::CodecSupport
+MSDKVideoDecoderFactory::QueryCodecSupport(
+    const webrtc::SdpVideoFormat& format,
+    bool reference_scaling) const {
+  webrtc::VideoDecoderFactory::CodecSupport support;
+  support.is_supported = format.IsCodecInList(GetSupportedFormats());
+  if (absl::EqualsIgnoreCase(format.name, cricket::kH264CodecName)) {
+    support.is_power_efficient = true;
+  }
+  return support;
+}
+
+std::unique_ptr<webrtc::VideoDecoder> MSDKVideoDecoderFactory::Create(
+    const webrtc::Environment& env,
     const webrtc::SdpVideoFormat& format) {
   bool vp9_hw = false, vp8_hw = false, av1_hw = false, h264_hw = false;
   for (auto& codec : supported_codec_types_) {
@@ -70,36 +83,36 @@ MSDKVideoDecoderFactory::CreateVideoDecoder(
     else if (codec == webrtc::kVideoCodecVP9)
       vp9_hw = false;
   }
-  if (absl::EqualsIgnoreCase(format.name, webrtc::kVp9CodecName) && !vp9_hw) {
+  if (absl::EqualsIgnoreCase(format.name, cricket::kVp9CodecName) && !vp9_hw) {
     return webrtc::VP9Decoder::Create();
-  } else if (absl::EqualsIgnoreCase(format.name, webrtc::kVp8CodecName) &&
+  } else if (absl::EqualsIgnoreCase(format.name, cricket::kVp8CodecName) &&
              !vp8_hw) {
     RTC_LOG(LS_ERROR)
         << "Not supporting HW VP8 decoder. Requesting SW decoding.";
-    return webrtc::VP8Decoder::Create();
-  } else if (absl::EqualsIgnoreCase(format.name, webrtc::kH264CodecName) &&
+    return webrtc::CreateVp8Decoder(env);
+  } else if (absl::EqualsIgnoreCase(format.name, cricket::kH264CodecName) &&
              !h264_hw) {
     return webrtc::H264Decoder::Create();
-  } else if (absl::EqualsIgnoreCase(format.name, webrtc::kAv1CodecName) &&
+  } else if (absl::EqualsIgnoreCase(format.name, cricket::kAv1CodecName) &&
              !av1_hw) {
-    return webrtc::CreateLibaomAv1Decoder();
+    return webrtc::CreateDav1dDecoder();
   }
 
-  return MSDKVideoDecoder::Create(webrtc::VideoCodec(format));
+  webrtc::VideoCodec codec;
+  codec.codecType = owt::base::CodecUtils::ConvertSdpFormatToCodecType(format);
+  return MSDKVideoDecoder::Create(codec);
 }
 
 std::vector<webrtc::SdpVideoFormat>
 MSDKVideoDecoderFactory::GetSupportedFormats() const {
   std::vector<webrtc::SdpVideoFormat> supported_codecs;
-  supported_codecs.push_back(webrtc::SdpVideoFormat(webrtc::kVp8CodecName));
+  supported_codecs.push_back(webrtc::SdpVideoFormat(cricket::kVp8CodecName));
   for (const webrtc::SdpVideoFormat& format : webrtc::SupportedVP9Codecs())
     supported_codecs.push_back(format);
   for (const webrtc::SdpVideoFormat& format :
        owt::base::CodecUtils::SupportedH264Codecs())
     supported_codecs.push_back(format);
-  if (webrtc::kIsLibaomAv1DecoderSupported) {
-    supported_codecs.push_back(webrtc::SdpVideoFormat(webrtc::kAv1CodecName));
-  }
+  supported_codecs.push_back(webrtc::SdpVideoFormat(cricket::kAv1CodecName));
   return supported_codecs;
 }
 

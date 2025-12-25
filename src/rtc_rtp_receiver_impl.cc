@@ -1,5 +1,7 @@
 #include "rtc_rtp_receiver_impl.h"
 
+#include "internal/media_type_utils.h"
+
 #include "base/refcountedobject.h"
 #include "rtc_audio_track_impl.h"
 #include "rtc_dtls_transport_impl.h"
@@ -17,9 +19,9 @@ RTCRtpReceiverImpl::rtp_receiver() {
   return rtp_receiver_;
 }
 
-void RTCRtpReceiverImpl::OnFirstPacketReceived(webrtc::MediaType media_type) {
+void RTCRtpReceiverImpl::OnFirstPacketReceived(cricket::MediaType media_type) {
   if (nullptr != observer_) {
-    observer_->OnFirstPacketReceived(static_cast<RTCMediaType>(media_type));
+    observer_->OnFirstPacketReceived(ToRTCMediaType(media_type));
   }
 }
 
@@ -66,7 +68,7 @@ vector<scoped_refptr<RTCMediaStream>> RTCRtpReceiverImpl::streams() const {
 }
 
 RTCMediaType RTCRtpReceiverImpl::media_type() const {
-  return static_cast<RTCMediaType>(rtp_receiver_->media_type());
+  return ToRTCMediaType(rtp_receiver_->media_type());
 }
 
 const string RTCRtpReceiverImpl::id() const { return rtp_receiver_->id(); }

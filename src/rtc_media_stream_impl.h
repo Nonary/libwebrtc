@@ -3,6 +3,7 @@
 
 #include "api/media_stream_interface.h"
 #include "api/peer_connection_interface.h"
+#include "rtc_base/ref_counted_object.h"
 
 #include "rtc_media_stream.h"
 #include "rtc_peerconnection.h"
@@ -22,7 +23,7 @@ class WebRTCStatsCollectorCallback : public webrtc::RTCStatsCollectorCallback {
       OnStatsCollectorSuccess success, OnStatsCollectorFailure failure) {
     webrtc::scoped_refptr<WebRTCStatsCollectorCallback> rtc_stats_observer =
         webrtc::scoped_refptr<WebRTCStatsCollectorCallback>(
-            new webrtc::RefCountedObject<WebRTCStatsCollectorCallback>(success,
+            new rtc::RefCountedObject<WebRTCStatsCollectorCallback>(success,
                                                                     failure));
     rtc_stats_observer->AddRef();
     return rtc_stats_observer;

@@ -1,5 +1,7 @@
 #include "rtc_rtp_sender_impl.h"
 
+#include "internal/media_type_utils.h"
+
 #include <src/rtc_audio_track_impl.h>
 #include <src/rtc_dtls_transport_impl.h>
 #include <src/rtc_dtmf_sender_impl.h>
@@ -59,7 +61,7 @@ scoped_refptr<RTCDtlsTransport> RTCRtpSenderImpl::dtls_transport() const {
 uint32_t RTCRtpSenderImpl::ssrc() const { return rtp_sender_->ssrc(); }
 
 RTCMediaType RTCRtpSenderImpl::media_type() const {
-  return static_cast<RTCMediaType>(rtp_sender_->media_type());
+  return ToRTCMediaType(rtp_sender_->media_type());
 }
 
 const string RTCRtpSenderImpl::id() const { return rtp_sender_->id(); }

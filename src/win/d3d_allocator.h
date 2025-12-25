@@ -42,10 +42,10 @@ https://software.intel.com/en-us/media-client-solutions-support.
 
 #if defined(WEBRTC_WIN)
 
-#include <atlbase.h>
 #include <d3d9.h>
 #include <dxva2api.h>
 #include <initguid.h>
+#include <wrl/client.h>
 
 #include <vector>
 
@@ -71,7 +71,9 @@ class D3DFrameAllocator : public BaseFrameAllocator {
   virtual mfxStatus Init(mfxAllocatorParams* pParams);
   virtual mfxStatus Close();
 
-  virtual IDirect3DDeviceManager9* GetDeviceManager() { return m_manager; }
+  virtual IDirect3DDeviceManager9* GetDeviceManager() {
+    return m_manager.Get();
+  }
 
   virtual mfxStatus LockFrame(mfxMemId mid, mfxFrameData* ptr);
   virtual mfxStatus UnlockFrame(mfxMemId mid, mfxFrameData* ptr);
@@ -87,9 +89,9 @@ class D3DFrameAllocator : public BaseFrameAllocator {
 
   std::vector<mfxHDLPair**> m_midsAllocated;
 
-  CComPtr<IDirect3DDeviceManager9> m_manager;
-  CComPtr<IDirectXVideoDecoderService> m_decoderService;
-  CComPtr<IDirectXVideoProcessorService> m_processorService;
+  Microsoft::WRL::ComPtr<IDirect3DDeviceManager9> m_manager;
+  Microsoft::WRL::ComPtr<IDirectXVideoDecoderService> m_decoderService;
+  Microsoft::WRL::ComPtr<IDirectXVideoProcessorService> m_processorService;
   HANDLE m_hDecoder;
   HANDLE m_hProcessor;
   DWORD m_surfaceUsage;

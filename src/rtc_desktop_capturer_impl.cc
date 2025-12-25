@@ -18,6 +18,7 @@
 
 #include "api/sequence_checker.h"
 #include "rtc_base/checks.h"
+#include "rtc_base/time_utils.h"
 #include "third_party/libyuv/include/libyuv.h"
 #ifdef WEBRTC_WIN
 #include "modules/desktop_capture/win/window_capture_utils.h"
@@ -29,8 +30,8 @@ enum { kCaptureDelay = 33, kCaptureMessageId = 1000 };
 
 RTCDesktopCapturerImpl::RTCDesktopCapturerImpl(
     DesktopType type, webrtc::DesktopCapturer::SourceId source_id,
-    webrtc::Thread* signaling_thread, scoped_refptr<MediaSource> source)
-    : thread_(webrtc::Thread::Create()),
+    rtc::Thread* signaling_thread, scoped_refptr<MediaSource> source)
+    : thread_(rtc::Thread::Create()),
       source_id_(source_id),
       signaling_thread_(signaling_thread),
       source_(source) {
@@ -201,8 +202,8 @@ void RTCDesktopCapturerImpl::OnCaptureResult(
 #endif
                           width, height, libyuv::kRotate0, libyuv::FOURCC_ARGB);
 
-    OnFrame(webrtc::VideoFrame(i420_buffer_, 0, webrtc::TimeMillis(),
-                               webrtc::kVideoRotation_0));
+    OnFrame(webrtc::VideoFrame(i420_buffer_, 0, rtc::TimeMillis(),
+                              webrtc::kVideoRotation_0));
   }
 #ifdef WEBRTC_WIN
   __except (filterException(GetExceptionCode(), GetExceptionInformation())) {
@@ -221,3 +222,4 @@ void RTCDesktopCapturerImpl::CaptureFrame() {
 }
 
 }  // namespace libwebrtc
+

@@ -50,7 +50,7 @@ AudioCodec MediaUtils::GetAudioCodecFromString(const std::string& codec_name) {
   if (it != audio_codec_names.end()) {
     return it->second;
   }
-  RTC_NOTREACHED();
+  RTC_DCHECK_NOTREACHED();
   return AudioCodec::kUnknown;
 }
 VideoCodec MediaUtils::GetVideoCodecFromString(const std::string& codec_name) {
@@ -58,7 +58,7 @@ VideoCodec MediaUtils::GetVideoCodecFromString(const std::string& codec_name) {
   if (it != video_codec_names.end()) {
     return it->second;
   }
-  RTC_NOTREACHED();
+  RTC_DCHECK_NOTREACHED();
   return VideoCodec::kUnknown;
 }
 std::string MediaUtils::AudioCodecToString(const AudioCodec& audio_codec) {
@@ -69,7 +69,7 @@ std::string MediaUtils::AudioCodecToString(const AudioCodec& audio_codec) {
   if (it != audio_codec_names.end()) {
     return it->first;
   } else {
-    RTC_NOTREACHED();
+    RTC_DCHECK_NOTREACHED();
     return "unknown";
   }
 }
@@ -81,7 +81,7 @@ std::string MediaUtils::VideoCodecToString(const VideoCodec& video_codec) {
   if (it != video_codec_names.end()) {
     return it->first;
   } else {
-    RTC_NOTREACHED();
+    RTC_DCHECK_NOTREACHED();
     return "unknown";
   }
 }
@@ -136,7 +136,7 @@ bool MediaUtils::GetH264TemporalInfo(uint8_t* buffer, size_t buffer_length,
 }
 
 absl::optional<AV1Profile> StringToAV1Profile(const std::string& str) {
-  const absl::optional<int> i = webrtc::StringToNumber<int>(str);
+  const absl::optional<int> i = rtc::StringToNumber<int>(str);
   if (!i.has_value()) return absl::nullopt;
 
   switch (i.value()) {
@@ -154,7 +154,7 @@ absl::optional<AV1Profile> StringToAV1Profile(const std::string& str) {
 
 absl::optional<H265ProfileId> StringToH265Profile(const std::string& str) {
 #ifdef OWT_USE_MSDK
-  const absl::optional<int> i = webrtc::StringToNumber<int>(str);
+  const absl::optional<int> i = rtc::StringToNumber<int>(str);
   if (!i.has_value()) return absl::nullopt;
   // See ISO/IEC-23008-2 section A.3.5. we use the general_profile_idc
   // as the profile-id per RFC 7798.

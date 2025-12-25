@@ -3,9 +3,11 @@
 
 #include <memory>
 
+#include "api/audio_options.h"
 #include "api/media_stream_interface.h"
 #include "api/peer_connection_interface.h"
 #include "api/task_queue/task_queue_factory.h"
+#include "api/video_codecs/video_encoder_factory.h"
 #include "rtc_audio_device_impl.h"
 #include "rtc_audio_processing_impl.h"
 #include "rtc_base/thread.h"
@@ -18,9 +20,6 @@
 #include "rtc_desktop_device_impl.h"
 #include "src/internal/desktop_capturer.h"
 #endif
-
-#include "src/internal/custom_audio_transport_impl.h"
-#include "src/internal/local_audio_track.h"
 
 namespace libwebrtc {
 
@@ -80,15 +79,24 @@ class RTCPeerConnectionFactoryImpl : public RTCPeerConnectionFactory {
   scoped_refptr<RTCRtpCapabilities> GetRtpReceiverCapabilities(
       RTCMediaType media_type) override;
 
-  webrtc::Thread* signaling_thread() { return signaling_thread_.get(); }
+  rtc::Thread* signaling_thread() { return signaling_thread_.get(); }
+
+  // Set a custom video encoder factory.
+  // Must be called before Initialize().
+  // The factory takes ownership of the encoder factory.
+  void SetVideoEncoderFactory(
+      std::unique_ptr<webrtc::VideoEncoderFactory> factory);
+
+  // Get the custom video encoder factory (if set).
+  webrtc::VideoEncoderFactory* GetVideoEncoderFactory();
 
  protected:
   void CreateAudioDeviceModule_w();
 
   void DestroyAudioDeviceModule_w();
 
-  webrtc::scoped_refptr<libwebrtc::LocalAudioSource>
-  CreateAudioSourceWithOptions(webrtc::AudioOptions* options,
+  webrtc::scoped_refptr<webrtc::AudioSourceInterface>
+  CreateAudioSourceWithOptions(const cricket::AudioOptions* options,
                                bool is_custom_source = false);
 
   scoped_refptr<RTCVideoSource> CreateVideoSource_s(
@@ -101,9 +109,9 @@ class RTCPeerConnectionFactoryImpl : public RTCPeerConnectionFactory {
       scoped_refptr<RTCMediaConstraints> constraints);
 #endif
  private:
-  std::unique_ptr<webrtc::Thread> worker_thread_;
-  std::unique_ptr<webrtc::Thread> signaling_thread_;
-  std::unique_ptr<webrtc::Thread> network_thread_;
+  std::unique_ptr<rtc::Thread> worker_thread_;
+  std::unique_ptr<rtc::Thread> signaling_thread_;
+  std::unique_ptr<rtc::Thread> network_thread_;
   webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface>
       rtc_peerconnection_factory_;
   webrtc::scoped_refptr<webrtc::AudioDeviceModule> audio_device_module_;
@@ -115,10 +123,11 @@ class RTCPeerConnectionFactoryImpl : public RTCPeerConnectionFactory {
 #endif
   std::list<scoped_refptr<RTCPeerConnection>> peerconnections_;
   std::unique_ptr<webrtc::TaskQueueFactory> task_queue_factory_;
-  webrtc::scoped_refptr<webrtc::CustomAudioTransportFactory>
-      audio_transport_factory_;
+  std::unique_ptr<webrtc::VideoEncoderFactory> custom_encoder_factory_;
+  webrtc::VideoEncoderFactory* custom_encoder_factory_ptr_ = nullptr;  // Non-owning pointer
 };
 
 }  // namespace libwebrtc
 
 #endif  // LIB_WEBRTC_MEDIA_SESSION_FACTORY_IMPL_HXX
+

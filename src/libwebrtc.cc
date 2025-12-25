@@ -13,7 +13,7 @@ static bool g_is_initialized = false;
 // Initializes SSL, if not initialized.
 bool LibWebRTC::Initialize() {
   if (!g_is_initialized) {
-    webrtc::InitializeSSL();
+    rtc::InitializeSSL();
     g_is_initialized = true;
   }
   return g_is_initialized;
@@ -21,8 +21,8 @@ bool LibWebRTC::Initialize() {
 
 // Stops and cleans up the threads and SSL.
 void LibWebRTC::Terminate() {
-  webrtc::ThreadManager::Instance()->SetCurrentThread(NULL);
-  webrtc::CleanupSSL();
+  rtc::ThreadManager::Instance()->SetCurrentThread(NULL);
+  rtc::CleanupSSL();
 
   // Resets the static variable g_is_initialized to false.
   g_is_initialized = false;
@@ -34,8 +34,8 @@ LibWebRTC::CreateRTCPeerConnectionFactory() {
   scoped_refptr<RTCPeerConnectionFactory> rtc_peerconnection_factory =
       scoped_refptr<RTCPeerConnectionFactory>(
           new RefCountedObject<RTCPeerConnectionFactoryImpl>());
-  rtc_peerconnection_factory->Initialize();
   return rtc_peerconnection_factory;
 }
 
 }  // namespace libwebrtc
+

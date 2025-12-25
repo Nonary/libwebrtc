@@ -330,7 +330,8 @@ mfxStatus D3D11FrameAllocator::CheckRequestType(mfxFrameAllocRequest* request) {
   if (MFX_ERR_NONE != sts) return sts;
 
   if ((request->Type & (MFX_MEMTYPE_VIDEO_MEMORY_DECODER_TARGET |
-                        MFX_MEMTYPE_VIDEO_MEMORY_PROCESSOR_TARGET)) != 0)
+                        MFX_MEMTYPE_VIDEO_MEMORY_PROCESSOR_TARGET |
+                        MFX_MEMTYPE_VIDEO_MEMORY_ENCODER_TARGET)) != 0)
     return MFX_ERR_NONE;
   else
     return MFX_ERR_UNSUPPORTED;

@@ -8,11 +8,11 @@
 #include "rtc_base/thread.h"
 
 namespace libwebrtc {
-class AudioDeviceImpl : public RTCAudioDevice, public webrtc::AudioDeviceObserver {
+class AudioDeviceImpl : public RTCAudioDevice, public webrtc::AudioDeviceSink {
  public:
   AudioDeviceImpl(
       webrtc::scoped_refptr<webrtc::AudioDeviceModule> audio_device_module,
-      webrtc::Thread* worker_thread);
+      rtc::Thread* worker_thread);
 
   virtual ~AudioDeviceImpl();
 
@@ -46,10 +46,11 @@ class AudioDeviceImpl : public RTCAudioDevice, public webrtc::AudioDeviceObserve
 
  private:
   webrtc::scoped_refptr<webrtc::AudioDeviceModule> audio_device_module_;
-  webrtc::Thread* worker_thread_ = nullptr;
+  rtc::Thread* worker_thread_ = nullptr;
   OnDeviceChangeCallback listener_ = nullptr;
 };
 
 }  // namespace libwebrtc
 
 #endif  // LIB_WEBRTC_AUDIO_DEVICE_IMPL_HXX
+

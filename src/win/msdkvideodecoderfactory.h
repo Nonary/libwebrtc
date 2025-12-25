@@ -8,6 +8,8 @@
 #include <memory>
 #include <vector>
 
+#include "absl/types/optional.h"
+#include "api/environment/environment.h"
 #include "api/video/video_codec_type.h"
 #include "api/video_codecs/sdp_video_format.h"
 #include "api/video_codecs/video_decoder.h"
@@ -26,7 +28,12 @@ class MSDKVideoDecoderFactory : public webrtc::VideoDecoderFactory {
   // VideoDecoderFactory implementation
   std::vector<webrtc::SdpVideoFormat> GetSupportedFormats() const override;
 
-  std::unique_ptr<webrtc::VideoDecoder> CreateVideoDecoder(
+  webrtc::VideoDecoderFactory::CodecSupport QueryCodecSupport(
+      const webrtc::SdpVideoFormat& format,
+      bool reference_scaling) const override;
+
+  std::unique_ptr<webrtc::VideoDecoder> Create(
+      const webrtc::Environment& env,
       const webrtc::SdpVideoFormat& format) override;
 
  private:

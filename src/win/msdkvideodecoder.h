@@ -6,9 +6,11 @@
 
 #include <codecapi.h>
 #include <combaseapi.h>
+#include <d3d9.h>
 #include <d3d11.h>
 #include <dxgi1_2.h>
 #include <dxva2api.h>
+#include <wrl/client.h>
 
 #include <memory>
 #include <utility>
@@ -98,19 +100,19 @@ class MSDKVideoDecoder : public webrtc::VideoDecoder {
   uint32_t m_dec_bs_offset_;
   // End of MSDK variables
 
-  CComPtr<ID3D11Device> d3d11_device_;
-  CComPtr<ID3D11DeviceContext> d3d11_device_context_;
-  CComPtr<ID3D11VideoDevice> d3d11_video_device_;
-  CComPtr<ID3D11VideoContext> d3d11_video_context_;
-  CComQIPtr<IDXGIAdapter> m_padapter_;
-  CComPtr<IDXGIFactory2> m_pdxgi_factory_;
+  Microsoft::WRL::ComPtr<ID3D11Device> d3d11_device_;
+  Microsoft::WRL::ComPtr<ID3D11DeviceContext> d3d11_device_context_;
+  Microsoft::WRL::ComPtr<ID3D11VideoDevice> d3d11_video_device_;
+  Microsoft::WRL::ComPtr<ID3D11VideoContext> d3d11_video_context_;
+  Microsoft::WRL::ComPtr<IDXGIAdapter> m_padapter_;
+  Microsoft::WRL::ComPtr<IDXGIFactory2> m_pdxgi_factory_;
   // Store current decoded frame.
   std::unique_ptr<D3D11ImageHandle> surface_handle_;
 
   bool inited_;
   int width_;
   int height_;
-  std::unique_ptr<webrtc::Thread>
+  std::unique_ptr<rtc::Thread>
       decoder_thread_;  // Thread on which the decoder will be working on.
 
   webrtc::VideoDecoder::Settings settings_;
@@ -122,3 +124,4 @@ class MSDKVideoDecoder : public webrtc::VideoDecoder {
 }  // namespace base
 }  // namespace owt
 #endif  // OWT_BASE_WIN_MSDKVIDEODECODER_H_
+

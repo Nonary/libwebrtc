@@ -1,5 +1,7 @@
 #include "rtc_data_channel_impl.h"
 
+#include "rtc_base/copy_on_write_buffer.h"
+
 namespace libwebrtc {
 
 RTCDataChannelImpl::RTCDataChannelImpl(
@@ -15,7 +17,7 @@ RTCDataChannelImpl::~RTCDataChannelImpl() {
 
 void RTCDataChannelImpl::Send(const uint8_t* data, uint32_t size,
                               bool binary /*= false*/) {
-  webrtc::CopyOnWriteBuffer copyOnWriteBuffer(data, size);
+  rtc::CopyOnWriteBuffer copyOnWriteBuffer(data, size);
   webrtc::DataBuffer buffer(copyOnWriteBuffer, binary);
   rtc_data_channel_->Send(buffer);
 }

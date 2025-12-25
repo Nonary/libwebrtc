@@ -4,7 +4,6 @@
 
 #include "msdkvideobase.h"
 
-#include "atlbase.h"
 #include "d3d11_allocator.h"
 #include "d3d_allocator.h"
 #include "mfxdefs.h"

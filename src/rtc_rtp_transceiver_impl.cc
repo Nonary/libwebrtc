@@ -1,5 +1,7 @@
 #include "rtc_rtp_transceiver_impl.h"
 
+#include "internal/media_type_utils.h"
+
 #include <src/rtc_rtp_capabilities_impl.h>
 #include <src/rtc_rtp_parameters_impl.h>
 #include <src/rtc_rtp_receiver_impl.h>
@@ -147,7 +149,7 @@ const string RTCRtpTransceiverImpl::mid() const {
 }
 
 RTCMediaType RTCRtpTransceiverImpl::media_type() const {
-  return static_cast<RTCMediaType>(rtp_transceiver_->media_type());
+  return ToRTCMediaType(rtp_transceiver_->media_type());
 }
 
 void RTCRtpTransceiverImpl::SetCodecPreferences(

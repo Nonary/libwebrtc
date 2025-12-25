@@ -2,6 +2,8 @@
 
 #include "rtc_peerconnection_factory_impl.h"
 
+#include "api/make_ref_counted.h"
+
 namespace libwebrtc {
 
 scoped_refptr<RTCFrameCryptor> FrameCryptorFactory::frameCryptorFromRtpSender(
@@ -42,7 +44,7 @@ RTCFrameCryptorImpl::RTCFrameCryptorImpl(
       key_index_(0),
       key_provider_(key_provider),
       sender_(sender),
-      observer_(webrtc::make_ref_counted<RTCFrameCryptorObserverAdapter>()) {
+      observer_(rtc::make_ref_counted<RTCFrameCryptorObserverAdapter>()) {
   auto factoryImpl = static_cast<RTCPeerConnectionFactoryImpl*>(factory.get());
   auto keyImpl = static_cast<DefaultKeyProviderImpl*>(key_provider.get());
   RTCRtpSenderImpl* impl = static_cast<RTCRtpSenderImpl*>(sender.get());
@@ -72,7 +74,7 @@ RTCFrameCryptorImpl::RTCFrameCryptorImpl(
       key_provider_(key_provider),
       receiver_(receiver),
       observer_(
-          webrtc::make_ref_counted<libwebrtc::RTCFrameCryptorObserverAdapter>()) {
+          rtc::make_ref_counted<libwebrtc::RTCFrameCryptorObserverAdapter>()) {
   auto factoryImpl = static_cast<RTCPeerConnectionFactoryImpl*>(factory.get());
   auto keyImpl = static_cast<DefaultKeyProviderImpl*>(key_provider.get());
   RTCRtpReceiverImpl* impl = static_cast<RTCRtpReceiverImpl*>(receiver.get());

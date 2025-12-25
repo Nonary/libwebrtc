@@ -5,11 +5,11 @@
 #ifndef OWT_BASE_WIN_D3D11_MANAGER_H
 #define OWT_BASE_WIN_D3D11_MANAGER_H
 
-#include <atlbase.h>
 #include <d3d11_2.h>
 #include <dxgi1_2.h>
 #include <mfapi.h>
 #include <mfobjects.h>
+#include <wrl/client.h>
 
 #include "rtc_base/logging.h"
 #include "rtc_base/ref_count.h"
@@ -37,14 +37,15 @@ class D3D11Manager : public webrtc::RefCountInterface {
       return false;
     }
 
-    CComPtr<IDXGIFactory2> factory;
-    hr = CreateDXGIFactory1(__uuidof(IDXGIFactory2), (void**)(&factory));
+    Microsoft::WRL::ComPtr<IDXGIFactory2> factory;
+    hr = CreateDXGIFactory1(__uuidof(IDXGIFactory2),
+                            reinterpret_cast<void**>(factory.GetAddressOf()));
     if (FAILED(hr)) {
       RTC_LOG(LS_ERROR) << "CreateDxgiFactory failed with error hr:" << hr;
       return false;
     }
 
-    hr = factory->EnumAdapters(0, &adapter_);
+    hr = factory->EnumAdapters(0, adapter_.ReleaseAndGetAddressOf());
     if (FAILED(hr)) {
       RTC_LOG(LS_ERROR) << "EnumAdapters failed with error hr:" << hr;
       return false;
@@ -61,19 +62,20 @@ class D3D11Manager : public webrtc::RefCountInterface {
     hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
                            creation_flags, feature_levels_in,
                            ARRAYSIZE(feature_levels_in), D3D11_SDK_VERSION,
-                           &device_, &feature_levels_out, &ctx_);
+                           device_.GetAddressOf(), &feature_levels_out,
+                           ctx_.GetAddressOf());
     if (FAILED(hr)) {
       RTC_LOG(LS_ERROR) << "D3D11 CreateDevice failed with error hr:" << hr;
       return false;
     }
 
-    hr = manager_->ResetDevice(device_, reset_token_);
+    hr = manager_->ResetDevice(device_.Get(), reset_token_);
     if (FAILED(hr)) {
       RTC_LOG(LS_ERROR) << "ResetDevice failed with error hr:" << hr;
       return false;
     }
 
-    hr = device_->QueryInterface(__uuidof(ID3D10Multithread), (void**)(&mt_));
+    hr = device_.As(&mt_);
     if (FAILED(hr)) {
       RTC_LOG(LS_ERROR) << "CreateDxgiFactory failed with error hr:" << hr;
       return false;
@@ -89,20 +91,24 @@ class D3D11Manager : public webrtc::RefCountInterface {
     return true;
   }
 
-  CComPtr<IMFDXGIDeviceManager> GetManager() { return manager_; }
+  Microsoft::WRL::ComPtr<IMFDXGIDeviceManager> GetManager() {
+    return manager_;
+  }
 
-  CComPtr<ID3D11Device> GetDevice() { return device_; }
+  Microsoft::WRL::ComPtr<ID3D11Device> GetDevice() { return device_; }
 
-  CComPtr<ID3D11DeviceContext> GetDeviceContext() { return ctx_; }
+  Microsoft::WRL::ComPtr<ID3D11DeviceContext> GetDeviceContext() {
+    return ctx_;
+  }
 
-  CComPtr<ID3D10Multithread> GetMultiThread() { return mt_; }
+  Microsoft::WRL::ComPtr<ID3D10Multithread> GetMultiThread() { return mt_; }
 
  private:
-  CComPtr<IMFDXGIDeviceManager> manager_;
-  CComPtr<ID3D11Device> device_;
-  CComPtr<ID3D11DeviceContext> ctx_;
-  CComQIPtr<IDXGIAdapter> adapter_;
-  CComPtr<ID3D10Multithread> mt_;
+  Microsoft::WRL::ComPtr<IMFDXGIDeviceManager> manager_;
+  Microsoft::WRL::ComPtr<ID3D11Device> device_;
+  Microsoft::WRL::ComPtr<ID3D11DeviceContext> ctx_;
+  Microsoft::WRL::ComPtr<IDXGIAdapter> adapter_;
+  Microsoft::WRL::ComPtr<ID3D10Multithread> mt_;
   UINT reset_token_;
 };
 }  // namespace base

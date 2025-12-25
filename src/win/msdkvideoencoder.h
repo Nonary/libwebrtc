@@ -10,6 +10,11 @@
 #include <memory>
 #include <vector>
 
+#if defined(WEBRTC_WIN)
+#include <d3d11.h>
+#include <wrl/client.h>
+#endif
+
 #include "api/video_codecs/video_codec.h"
 #include "api/video_codecs/video_encoder.h"
 #include "base_allocator.h"
@@ -72,7 +77,7 @@ class MSDKVideoEncoder : public webrtc::VideoEncoder {
 
   MFXVideoSession* m_mfx_session_;
   std::unique_ptr<MFXVideoENCODE> m_pmfx_enc_;
-  std::shared_ptr<SysMemFrameAllocator> m_pmfx_allocator_;
+  std::shared_ptr<BaseFrameAllocator> m_pmfx_allocator_;
   mfxVideoParam m_mfx_enc_params_;
 
   // TODO(johny): MSDK will remove the version macro usage for headers.
@@ -86,8 +91,15 @@ class MSDKVideoEncoder : public webrtc::VideoEncoder {
   mfxFrameAllocResponse m_enc_response_;
   mfxFrameSurface1* m_penc_surfaces_;  // frames array for encoder
   mfxU32 m_frames_processed_;
-  std::unique_ptr<webrtc::Thread> encoder_thread_;
+  std::unique_ptr<rtc::Thread> encoder_thread_;
   std::atomic<bool> inited_;
+
+  webrtc::VideoCodec codec_settings_;
+  bool use_d3d11_ = false;
+#if defined(WEBRTC_WIN)
+  Microsoft::WRL::ComPtr<ID3D11Device> d3d11_device_;
+  Microsoft::WRL::ComPtr<ID3D11DeviceContext> d3d11_device_context_;
+#endif
 
   std::unique_ptr<webrtc::IvfFileWriter> dump_writer_;
   bool enable_bitstream_dump_ = false;
@@ -96,3 +108,4 @@ class MSDKVideoEncoder : public webrtc::VideoEncoder {
 }  // namespace base
 }  // namespace owt
 #endif  // OWT_BASE_WIN_MSDKVIDEOENCODER_H_
+

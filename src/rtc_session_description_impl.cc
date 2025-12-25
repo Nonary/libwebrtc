@@ -1,13 +1,15 @@
 #include "rtc_session_description_impl.h"
 
 #include "api/jsep.h"
+#include "absl/types/optional.h"
 
 namespace libwebrtc {
 
 scoped_refptr<RTCSessionDescription> RTCSessionDescription::Create(
     const string type, const string sdp, SdpParseError* error) {
   webrtc::SdpParseError sdp_error;
-  std::optional<webrtc::SdpType> maybe_type = webrtc::SdpTypeFromString(to_std_string(type));
+  absl::optional<webrtc::SdpType> maybe_type =
+      webrtc::SdpTypeFromString(to_std_string(type));
   if (!maybe_type) {
     return nullptr;
   }

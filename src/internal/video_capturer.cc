@@ -53,23 +53,23 @@ void VideoCapturer::OnFrame(const VideoFrame& frame) {
   }
 }
 
-webrtc::VideoSinkWants VideoCapturer::GetSinkWants() {
+rtc::VideoSinkWants VideoCapturer::GetSinkWants() {
   return broadcaster_.wants();
 }
 
-void VideoCapturer::AddOrUpdateSink(webrtc::VideoSinkInterface<VideoFrame>* sink,
-                                    const webrtc::VideoSinkWants& wants) {
+void VideoCapturer::AddOrUpdateSink(rtc::VideoSinkInterface<VideoFrame>* sink,
+                                    const rtc::VideoSinkWants& wants) {
   broadcaster_.AddOrUpdateSink(sink, wants);
   UpdateVideoAdapter();
 }
 
-void VideoCapturer::RemoveSink(webrtc::VideoSinkInterface<VideoFrame>* sink) {
+void VideoCapturer::RemoveSink(rtc::VideoSinkInterface<VideoFrame>* sink) {
   broadcaster_.RemoveSink(sink);
   UpdateVideoAdapter();
 }
 
 void VideoCapturer::UpdateVideoAdapter() {
-  webrtc::VideoSinkWants wants = broadcaster_.wants();
+  rtc::VideoSinkWants wants = broadcaster_.wants();
 
   if (0 < wants.resolutions.size()) {
     auto size = wants.resolutions.at(0);
@@ -83,3 +83,4 @@ void VideoCapturer::UpdateVideoAdapter() {
 
 }  // namespace internal
 }  // namespace webrtc
+

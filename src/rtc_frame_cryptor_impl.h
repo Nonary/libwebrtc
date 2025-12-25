@@ -4,6 +4,7 @@
 #include "api/crypto/frame_crypto_transformer.h"
 #include "api/rtp_receiver_interface.h"
 #include "api/rtp_sender_interface.h"
+#include "rtc_base/ref_counted_object.h"
 #include "rtc_frame_cryptor.h"
 #include "rtc_rtp_receiver_impl.h"
 #include "rtc_rtp_sender_impl.h"
@@ -23,7 +24,7 @@ class DefaultKeyProviderImpl : public KeyProvider {
     rtc_options.discard_frame_when_cryptor_not_ready =
         options->discard_frame_when_cryptor_not_ready;
     impl_ =
-        new webrtc::RefCountedObject<webrtc::DefaultKeyProviderImpl>(rtc_options);
+        new rtc::RefCountedObject<webrtc::DefaultKeyProviderImpl>(rtc_options);
   }
   ~DefaultKeyProviderImpl() {}
 

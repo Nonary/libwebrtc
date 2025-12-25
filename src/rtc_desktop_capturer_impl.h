@@ -37,7 +37,7 @@ class RTCDesktopCapturerImpl : public RTCDesktopCapturer,
  public:
   RTCDesktopCapturerImpl(DesktopType type,
                          webrtc::DesktopCapturer::SourceId source_id,
-                         webrtc::Thread* signaling_thread,
+                         rtc::Thread* signaling_thread,
                          scoped_refptr<MediaSource> source);
   ~RTCDesktopCapturerImpl();
 
@@ -67,7 +67,7 @@ class RTCDesktopCapturerImpl : public RTCDesktopCapturer,
   void CaptureFrame();
   webrtc::DesktopCaptureOptions options_;
   std::unique_ptr<webrtc::DesktopCapturer> capturer_;
-  std::unique_ptr<webrtc::Thread> thread_;
+  std::unique_ptr<rtc::Thread> thread_;
   webrtc::scoped_refptr<webrtc::I420Buffer> i420_buffer_;
   CaptureState capture_state_ = CS_STOPPED;
   DesktopType type_;
@@ -76,7 +76,7 @@ class RTCDesktopCapturerImpl : public RTCDesktopCapturer,
   uint32_t capture_delay_ = 1000;  // 1s
   webrtc::DesktopCapturer::Result result_ =
       webrtc::DesktopCapturer::Result::SUCCESS;
-  webrtc::Thread* signaling_thread_ = nullptr;
+  rtc::Thread* signaling_thread_ = nullptr;
   scoped_refptr<MediaSource> source_;
   uint32_t x_ = 0;
   uint32_t y_ = 0;
@@ -87,3 +87,4 @@ class RTCDesktopCapturerImpl : public RTCDesktopCapturer,
 }  // namespace libwebrtc
 
 #endif  // LIBWEBRTC_RTC_DESKTOP_CAPTURER_IMPL_HXX
+

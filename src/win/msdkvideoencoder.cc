@@ -11,11 +11,17 @@
 #include "common_video/h264/h264_common.h"
 #include "libyuv/convert_from.h"
 #include "mfxcommon.h"
+#include "modules/video_coding/include/video_codec_interface.h"
+#include "modules/video_coding/include/video_error_codes.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/strings/string_builder.h"
 #include "rtc_base/system/file_wrapper.h"
 #include "rtc_base/thread.h"
+#include "rtc_base/time_utils.h"
+#include "src/win/d3d11_allocator.h"
 #include "src/win/d3d_allocator.h"
+#include "src/win/d3d11_texture_buffer.h"
 #include "src/win/mediautils.h"
 #include "src/win/msdkvideobase.h"
 #include "system_wrappers/include/field_trial.h"
@@ -33,7 +39,7 @@ MSDKVideoEncoder::MSDKVideoEncoder(const webrtc::VideoCodec& format)
       bitrate_(0),
       width_(0),
       height_(0),
-      encoder_thread_(webrtc::Thread::Create()),
+      encoder_thread_(rtc::Thread::Create()),
       inited_(false) {
   m_penc_surfaces_ = nullptr;
   m_frames_processed_ = 0;
@@ -55,9 +61,9 @@ MSDKVideoEncoder::MSDKVideoEncoder(const webrtc::VideoCodec& format)
   if (!encoder_dump_file_name_.empty()) {
     enable_bitstream_dump_ = true;
     char filename_buffer[256];
-    webrtc::SimpleStringBuilder ssb(filename_buffer);
+    rtc::SimpleStringBuilder ssb(filename_buffer);
     ssb << encoder_dump_file_name_ << "/webrtc_send_stream_"
-        << webrtc::TimeMicros() << ".ivf";
+        << rtc::TimeMicros() << ".ivf";
     dump_writer_ = webrtc::IvfFileWriter::Wrap(
         webrtc::FileWrapper::OpenWriteOnly(ssb.str()),
         /* byte_limit= */ 100000000);
@@ -87,6 +93,7 @@ int MSDKVideoEncoder::InitEncode(const webrtc::VideoCodec* codec_settings,
                                  int number_of_cores, size_t max_payload_size) {
   RTC_DCHECK(codec_settings);
 
+  codec_settings_ = *codec_settings;
   width_ = codec_settings->width;
   height_ = codec_settings->height;
   bitrate_ = codec_settings->maxBitrate * 1000;
@@ -96,8 +103,8 @@ int MSDKVideoEncoder::InitEncode(const webrtc::VideoCodec* codec_settings,
   //     RTC_FROM_HERE,
   //     webrtc::Bind(&MSDKVideoEncoder::InitEncodeOnEncoderThread, this,
   //               codec_settings, number_of_cores, max_payload_size));
-  return encoder_thread_->Invoke<int>(
-      RTC_FROM_HERE, [this, codec_settings, number_of_cores, max_payload_size] {
+  return encoder_thread_->BlockingCall(
+      [this, codec_settings, number_of_cores, max_payload_size] {
         return InitEncodeOnEncoderThread(codec_settings, number_of_cores,
                                          max_payload_size);
       });
@@ -158,16 +165,26 @@ int MSDKVideoEncoder::InitEncodeOnEncoderThread(
     // Alternatively we totally reinitialize the encoder here.
   } else {
   }
+  if (use_d3d11_ && !d3d11_device_) {
+    use_d3d11_ = false;
+  }
+
   MSDKFactory* factory = MSDKFactory::Get();
-  // We're not using d3d11.
-  m_mfx_session_ = factory->CreateSession(false);
+  m_mfx_session_ = factory->CreateSession(use_d3d11_);
   if (!m_mfx_session_) {
     return WEBRTC_VIDEO_CODEC_ERROR;
   }
   // We only enable HEVC on ICL+, so not loading any GACC/SW HEVC plugin
   // with our implementation.
 
-  m_pmfx_allocator_ = MSDKFactory::CreateFrameAllocator();
+  if (use_d3d11_) {
+    mfxHandleType handle_type = MFX_HANDLE_D3D11_DEVICE;
+    m_mfx_session_->SetHandle(handle_type, d3d11_device_.Get());
+    m_pmfx_allocator_ =
+        MSDKFactory::CreateD3D11FrameAllocator(d3d11_device_.Get());
+  } else {
+    m_pmfx_allocator_ = MSDKFactory::CreateFrameAllocator();
+  }
   if (nullptr == m_pmfx_allocator_) {
     return WEBRTC_VIDEO_CODEC_ERROR;
   }
@@ -196,7 +213,8 @@ int MSDKVideoEncoder::InitEncodeOnEncoderThread(
   MSDKConvertFrameRate(30, &m_mfx_enc_params_.mfx.FrameInfo.FrameRateExtN,
                        &m_mfx_enc_params_.mfx.FrameInfo.FrameRateExtD);
   m_mfx_enc_params_.mfx.EncodedOrder = 0;
-  m_mfx_enc_params_.IOPattern = MFX_IOPATTERN_IN_SYSTEM_MEMORY;
+  m_mfx_enc_params_.IOPattern = use_d3d11_ ? MFX_IOPATTERN_IN_VIDEO_MEMORY
+                                          : MFX_IOPATTERN_IN_SYSTEM_MEMORY;
 
   // Frame info parameters
   m_mfx_enc_params_.mfx.FrameInfo.FourCC = MFX_FOURCC_NV12;
@@ -312,12 +330,17 @@ int MSDKVideoEncoder::InitEncodeOnEncoderThread(
     memset(&(m_penc_surfaces_[i]), 0, sizeof(mfxFrameSurface1));
     MSDK_MEMCPY_VAR(m_penc_surfaces_[i].Info,
                     &(m_mfx_enc_params_.mfx.FrameInfo), sizeof(mfxFrameInfo));
-    // Since we're not going to share it with sdk. we need to lock it here.
-    sts = m_pmfx_allocator_->Lock(m_pmfx_allocator_->pthis,
-                                  m_enc_response_.mids[i],
-                                  &(m_penc_surfaces_[i].Data));
-    if (MFX_ERR_NONE != sts) {
-      return WEBRTC_VIDEO_CODEC_ERROR;
+    if (use_d3d11_) {
+      m_penc_surfaces_[i].Data.MemId = m_enc_response_.mids[i];
+      m_penc_surfaces_[i].Data.MemType = EncRequest.Type;
+    } else {
+      // Since we're not going to share it with sdk. we need to lock it here.
+      sts = m_pmfx_allocator_->Lock(m_pmfx_allocator_->pthis,
+                                    m_enc_response_.mids[i],
+                                    &(m_penc_surfaces_[i].Data));
+      if (MFX_ERR_NONE != sts) {
+        return WEBRTC_VIDEO_CODEC_ERROR;
+      }
     }
   }
 
@@ -383,6 +406,33 @@ int MSDKVideoEncoder::Encode(
       }
     }
   }
+  auto frame_buffer = input_image.video_frame_buffer();
+  if (frame_buffer &&
+      frame_buffer->type() == webrtc::VideoFrameBuffer::Type::kNative) {
+    auto* native_buffer =
+        static_cast<owt::base::D3D11TextureBuffer*>(frame_buffer.get());
+    ID3D11Texture2D* src_texture = native_buffer->texture();
+    if (!src_texture) {
+      return WEBRTC_VIDEO_CODEC_ERROR;
+    }
+    Microsoft::WRL::ComPtr<ID3D11Device> device;
+    src_texture->GetDevice(device.GetAddressOf());
+    if (!device) {
+      return WEBRTC_VIDEO_CODEC_ERROR;
+    }
+    if (!use_d3d11_ || d3d11_device_ != device) {
+      d3d11_device_ = device;
+      d3d11_device_context_.Reset();
+      device->GetImmediateContext(
+          d3d11_device_context_.ReleaseAndGetAddressOf());
+      use_d3d11_ = true;
+      const int init_result =
+          InitEncodeOnEncoderThread(&codec_settings_, 0, 0);
+      if (init_result != WEBRTC_VIDEO_CODEC_OK) {
+        return init_result;
+      }
+    }
+  }
   sts = m_pmfx_enc_->GetVideoParam(&m_mfx_enc_params_);
 
   nEncSurfIdx =
@@ -392,59 +442,84 @@ int MSDKVideoEncoder::Encode(
   }
 
   pSurf = &m_penc_surfaces_[nEncSurfIdx];
-  sts = m_pmfx_allocator_->Lock(m_pmfx_allocator_->pthis, pSurf->Data.MemId,
-                                &(pSurf->Data));
-  if (MFX_ERR_NONE != sts) {
-    return WEBRTC_VIDEO_CODEC_ERROR;
-  }
-  // Load the image onto surface. Check the frame info first to format.
-  mfxFrameInfo& pInfo = pSurf->Info;
-  mfxFrameData& pData = pSurf->Data;
-  pData.FrameOrder = m_frames_processed_;
-
-  if (MFX_FOURCC_NV12 != pInfo.FourCC && MFX_FOURCC_YV12 != pInfo.FourCC &&
-      MFX_FOURCC_P010 != pInfo.FourCC && MFX_FOURCC_Y410 != pInfo.FourCC) {
-    RTC_LOG(LS_ERROR) << "Invalid surface format allocated by frame allocator.";
-    return WEBRTC_VIDEO_CODEC_ERROR;
-  }
-  mfxU16 w, h, pitch;
-  mfxU8* ptr;
-  if (pInfo.CropH > 0 && pInfo.CropW > 0) {
-    w = pInfo.CropW;
-    h = pInfo.CropH;
+  pSurf->Data.FrameOrder = m_frames_processed_;
+  const bool use_native_input =
+      use_d3d11_ && frame_buffer &&
+      frame_buffer->type() == webrtc::VideoFrameBuffer::Type::kNative;
+  if (use_native_input) {
+    auto* native_buffer =
+        static_cast<owt::base::D3D11TextureBuffer*>(frame_buffer.get());
+    ID3D11Texture2D* src_texture = native_buffer->texture();
+    if (!src_texture || !d3d11_device_context_) {
+      return WEBRTC_VIDEO_CODEC_ERROR;
+    }
+    mfxHDLPair pair = {};
+    sts = m_pmfx_allocator_->GetFrameHDL(pSurf->Data.MemId,
+                                         reinterpret_cast<mfxHDL*>(&pair));
+    if (MFX_ERR_NONE != sts || !pair.first) {
+      return WEBRTC_VIDEO_CODEC_ERROR;
+    }
+    ID3D11Texture2D* dst_texture =
+        reinterpret_cast<ID3D11Texture2D*>(pair.first);
+    const UINT dst_subresource =
+        static_cast<UINT>(reinterpret_cast<size_t>(pair.second));
+    d3d11_device_context_->CopySubresourceRegion(dst_texture, dst_subresource,
+                                                 0, 0, 0, src_texture, 0,
+                                                 nullptr);
   } else {
-    w = pInfo.Width;
-    h = pInfo.Height;
-  }
-
-  pitch = pData.Pitch;
-  ptr = pData.Y + pInfo.CropX + pInfo.CropY * pData.Pitch;
-
-  if (MFX_FOURCC_NV12 == pInfo.FourCC) {
-    webrtc::scoped_refptr<webrtc::I420BufferInterface> buffer(
-        input_image.video_frame_buffer()->ToI420());
-
-    libyuv::I420ToNV12(buffer->DataY(), buffer->StrideY(), buffer->DataU(),
-                       buffer->StrideU(), buffer->DataV(), buffer->StrideV(),
-                       pData.Y, pitch, pData.UV, pitch, w, h);
-  } else if (MFX_FOURCC_YV12 == pInfo.FourCC) {
-    // Do not support it.
-    return WEBRTC_VIDEO_CODEC_ERROR;
-  } else if (MFX_FOURCC_P010 == pInfo.FourCC) {
-    // Source is always I420.
-    webrtc::scoped_refptr<webrtc::I420BufferInterface> buffer(
-        input_image.video_frame_buffer()->ToI420());
-    libyuv::I420ToI010(buffer->DataY(), buffer->StrideY(), buffer->DataU(),
-                       buffer->StrideU(), buffer->DataV(), buffer->StrideV(),
-                       pData.Y16, pitch, pData.U16, pitch, pData.V16, pitch, w,
-                       h);
-  }
-
-  // Done with the frame
-  sts = m_pmfx_allocator_->Unlock(m_pmfx_allocator_->pthis, pSurf->Data.MemId,
+    sts = m_pmfx_allocator_->Lock(m_pmfx_allocator_->pthis, pSurf->Data.MemId,
                                   &(pSurf->Data));
-  if (MFX_ERR_NONE != sts) {
-    return WEBRTC_VIDEO_CODEC_ERROR;
+    if (MFX_ERR_NONE != sts) {
+      return WEBRTC_VIDEO_CODEC_ERROR;
+    }
+    // Load the image onto surface. Check the frame info first to format.
+    mfxFrameInfo& pInfo = pSurf->Info;
+    mfxFrameData& pData = pSurf->Data;
+
+    if (MFX_FOURCC_NV12 != pInfo.FourCC && MFX_FOURCC_YV12 != pInfo.FourCC &&
+        MFX_FOURCC_P010 != pInfo.FourCC && MFX_FOURCC_Y410 != pInfo.FourCC) {
+      RTC_LOG(LS_ERROR)
+          << "Invalid surface format allocated by frame allocator.";
+      return WEBRTC_VIDEO_CODEC_ERROR;
+    }
+    mfxU16 w, h, pitch;
+    if (pInfo.CropH > 0 && pInfo.CropW > 0) {
+      w = pInfo.CropW;
+      h = pInfo.CropH;
+    } else {
+      w = pInfo.Width;
+      h = pInfo.Height;
+    }
+
+    pitch = pData.Pitch;
+
+    if (MFX_FOURCC_NV12 == pInfo.FourCC) {
+      webrtc::scoped_refptr<webrtc::I420BufferInterface> buffer(
+          input_image.video_frame_buffer()->ToI420());
+
+      libyuv::I420ToNV12(
+          buffer->DataY(), buffer->StrideY(), buffer->DataU(),
+          buffer->StrideU(), buffer->DataV(), buffer->StrideV(), pData.Y,
+          pitch, pData.UV, pitch, w, h);
+    } else if (MFX_FOURCC_YV12 == pInfo.FourCC) {
+      // Do not support it.
+      return WEBRTC_VIDEO_CODEC_ERROR;
+    } else if (MFX_FOURCC_P010 == pInfo.FourCC) {
+      // Source is always I420.
+      webrtc::scoped_refptr<webrtc::I420BufferInterface> buffer(
+          input_image.video_frame_buffer()->ToI420());
+      libyuv::I420ToI010(buffer->DataY(), buffer->StrideY(), buffer->DataU(),
+                         buffer->StrideU(), buffer->DataV(), buffer->StrideV(),
+                         pData.Y16, pitch, pData.U16, pitch, pData.V16, pitch,
+                         w, h);
+    }
+
+    // Done with the frame
+    sts = m_pmfx_allocator_->Unlock(m_pmfx_allocator_->pthis, pSurf->Data.MemId,
+                                    &(pSurf->Data));
+    if (MFX_ERR_NONE != sts) {
+      return WEBRTC_VIDEO_CODEC_ERROR;
+    }
   }
 
   // Prepare done. Start encode.
@@ -522,7 +597,7 @@ retry:
   encodedFrame._encodedHeight = input_image.height();
   encodedFrame._encodedWidth = input_image.width();
   encodedFrame.capture_time_ms_ = input_image.render_time_ms();
-  encodedFrame.SetTimestamp(input_image.timestamp());
+  encodedFrame.SetRtpTimestamp(input_image.timestamp());
   // For VP9 we will override this.
   encodedFrame._frameType = is_keyframe_required
                                 ? webrtc::VideoFrameType::kVideoFrameKey
@@ -615,9 +690,8 @@ void MSDKVideoEncoder::OnLossNotification(
 
 webrtc::VideoEncoder::EncoderInfo MSDKVideoEncoder::GetEncoderInfo() const {
   EncoderInfo info;
-  info.supports_native_handle = false;
+  info.supports_native_handle = true;
   info.is_hardware_accelerated = true;
-  info.has_internal_source = false;
   info.implementation_name = "IntelMediaSDK";
   // Disable frame-dropper for MSDK.
   info.has_trusted_rate_controller = true;
@@ -651,6 +725,10 @@ int MSDKVideoEncoder::Release() {
   }
   if (m_pmfx_allocator_) m_pmfx_allocator_->Close();
   m_pmfx_allocator_.reset();
+
+  use_d3d11_ = false;
+  d3d11_device_.Reset();
+  d3d11_device_context_.Reset();
 
   inited_ = false;
   // Need to reset to that the session is invalidated and won't use the
@@ -710,3 +788,4 @@ std::unique_ptr<MSDKVideoEncoder> MSDKVideoEncoder::Create(
 
 }  // namespace base
 }  // namespace owt
+

@@ -24,7 +24,8 @@ int32_t CustomAudioTransportImpl::RecordedDataIsAvailable(
     const void* audioSamples, size_t nSamples, size_t nBytesPerSample,
     size_t nChannels, uint32_t samplesPerSec, uint32_t totalDelayMS,
     int32_t clockDrift, uint32_t currentMicLevel, bool keyPressed,
-    uint32_t& newMicLevel, std::optional<int64_t> estimated_capture_time_ns) {
+    uint32_t& newMicLevel,
+    absl::optional<int64_t> estimated_capture_time_ns) {
   return audio_transport_impl_->RecordedDataIsAvailable(
       audioSamples, nSamples, nBytesPerSample, nChannels, samplesPerSec,
       totalDelayMS, clockDrift, currentMicLevel, keyPressed, newMicLevel,

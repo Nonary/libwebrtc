@@ -1,13 +1,18 @@
 #include "rtc_peerconnection_impl.h"
 
+#include "internal/media_type_utils.h"
+
 #include <functional>
 #include <utility>
 #include <vector>
 
+#include "absl/types/optional.h"
 #include "api/data_channel_interface.h"
 #include "api/jsep.h"
+#include "api/make_ref_counted.h"
 #include "pc/media_session.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/ref_counted_object.h"
 #include "rtc_data_channel_impl.h"
 #include "rtc_ice_candidate_impl.h"
 #include "rtc_media_stream_impl.h"
@@ -16,7 +21,7 @@
 #include "rtc_rtp_sender_impl.h"
 #include "rtc_rtp_transceiver_impl.h"
 
-using webrtc::Thread;
+using rtc::Thread;
 
 static std::map<libwebrtc::RtcpMuxPolicy,
                 webrtc::PeerConnectionInterface::RtcpMuxPolicy>
@@ -143,7 +148,7 @@ class SetSessionDescriptionObserverProxy
   ~SetSessionDescriptionObserverProxy() {}
   static webrtc::scoped_refptr<SetSessionDescriptionObserverProxy> Create(
       OnSetSdpSuccess success_callback, OnSetSdpFailure failure_callback) {
-    return webrtc::make_ref_counted<SetSessionDescriptionObserverProxy>(
+    return rtc::make_ref_counted<SetSessionDescriptionObserverProxy>(
         success_callback, failure_callback);
   }
   virtual void OnSetLocalDescriptionComplete(webrtc::RTCError error) override {
@@ -184,7 +189,7 @@ class CreateSessionDescriptionObserverProxy
   static CreateSessionDescriptionObserverProxy* Create(
       OnSdpCreateSuccess success_callback,
       OnSdpCreateFailure failure_callback) {
-    return new webrtc::RefCountedObject<CreateSessionDescriptionObserverProxy>(
+    return new rtc::RefCountedObject<CreateSessionDescriptionObserverProxy>(
         success_callback, failure_callback);
   }
 
@@ -441,11 +446,11 @@ bool RTCPeerConnectionImpl::Initialize() {
                                            media_constraints->GetOptional());
   CopyConstraintsIntoRtcConfiguration(&rtc_constraints, &config);
 
-  webrtc::PeerConnectionFactoryInterface::Options options;
-  options.disable_encryption =
-      (configuration_.srtp_type == MediaSecurityType::kSRTP_None);
-  // options.network_ignore_mask |= ADAPTER_TYPE_CELLULAR;
-  rtc_peerconnection_factory_->SetOptions(options);
+  // Note: SetOptions is not called per-peer because:
+  // 1. WebRTC spec requires DTLS-SRTP encryption for browser clients
+  // 2. Calling SetOptions from a non-network thread causes deadlocks in WebRTC M100+
+  // 3. Factory-level options should be set once during factory initialization
+  // If encryption needs to be disabled for testing, set it in factory initialization.
 
   webrtc::PeerConnectionDependencies dependencies(this);
   auto result = rtc_peerconnection_factory_->CreatePeerConnectionOrError(
@@ -495,7 +500,7 @@ void RTCPeerConnectionImpl::SetLocalDescription(const string sdp,
                                                 OnSetSdpSuccess success,
                                                 OnSetSdpFailure failure) {
   webrtc::SdpParseError error;
-  std::optional<webrtc::SdpType> maybe_type =
+  absl::optional<webrtc::SdpType> maybe_type =
       webrtc::SdpTypeFromString(to_std_string(type));
   if (!maybe_type) {
     return;
@@ -511,7 +516,7 @@ void RTCPeerConnectionImpl::SetLocalDescription(const string sdp,
     return;
   }
   webrtc::scoped_refptr<webrtc::SetLocalDescriptionObserverInterface> observer =
-      webrtc::make_ref_counted<SetSessionDescriptionObserverProxy>(success,
+      rtc::make_ref_counted<SetSessionDescriptionObserverProxy>(success,
                                                                    failure);
   rtc_peerconnection_->SetLocalDescription(std::move(session_description),
                                            observer);
@@ -524,7 +529,7 @@ void RTCPeerConnectionImpl::SetRemoteDescription(const string sdp,
   RTC_LOG(LS_INFO) << " Received session description :" << to_std_string(sdp);
   webrtc::SdpParseError error;
   webrtc::SdpParseError sdp_error;
-  std::optional<webrtc::SdpType> maybe_type =
+  absl::optional<webrtc::SdpType> maybe_type =
       webrtc::SdpTypeFromString(type.std_string());
   if (!maybe_type) {
     return;
@@ -539,16 +544,16 @@ void RTCPeerConnectionImpl::SetRemoteDescription(const string sdp,
     return;
   }
 
-  webrtc::MediaContentDescription* content_desc =
+  cricket::MediaContentDescription* content_desc =
       session_description->description()->GetContentDescriptionByName("video");
-  webrtc::MediaContentDescription* media_content_desc =
-      (webrtc::MediaContentDescription*)content_desc;
+  cricket::MediaContentDescription* media_content_desc =
+      (cricket::MediaContentDescription*)content_desc;
 
   if (media_content_desc && configuration_.local_video_bandwidth > 0)
     media_content_desc->set_bandwidth(configuration_.local_video_bandwidth *
                                       1000);
   webrtc::scoped_refptr<webrtc::SetRemoteDescriptionObserverInterface>
-      observer = webrtc::make_ref_counted<SetSessionDescriptionObserverProxy>(
+      observer = rtc::make_ref_counted<SetSessionDescriptionObserverProxy>(
           success, failure);
   rtc_peerconnection_->SetRemoteDescription(std::move(session_description),
                                             observer);
@@ -807,10 +812,10 @@ scoped_refptr<RTCRtpTransceiver> RTCPeerConnectionImpl::AddTransceiver(
     RTCMediaType media_type) {
   webrtc::RTCErrorOr<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>>
       errorOr;
-  if (media_type == RTCMediaType::AUDIO) {
-    errorOr = rtc_peerconnection_->AddTransceiver(webrtc::MediaType::AUDIO);
-  } else if (media_type == RTCMediaType::VIDEO) {
-    errorOr = rtc_peerconnection_->AddTransceiver(webrtc::MediaType::VIDEO);
+  cricket::MediaType kind = ToCricketMediaType(media_type);
+  if (kind == cricket::MEDIA_TYPE_AUDIO ||
+      kind == cricket::MEDIA_TYPE_VIDEO) {
+    errorOr = rtc_peerconnection_->AddTransceiver(kind);
   }
   if (errorOr.ok()) {
     return new RefCountedObject<RTCRtpTransceiverImpl>(errorOr.value());
@@ -825,12 +830,11 @@ scoped_refptr<RTCRtpTransceiver> RTCPeerConnectionImpl::AddTransceiver(
       static_cast<RTCRtpTransceiverInitImpl*>(init.get());
   webrtc::RTCErrorOr<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>>
       errorOr;
-  if (media_type == RTCMediaType::AUDIO) {
+  cricket::MediaType kind = ToCricketMediaType(media_type);
+  if (kind == cricket::MEDIA_TYPE_AUDIO ||
+      kind == cricket::MEDIA_TYPE_VIDEO) {
     errorOr = rtc_peerconnection_->AddTransceiver(
-        webrtc::MediaType::AUDIO, initImpl->rtp_transceiver_init());
-  } else if (media_type == RTCMediaType::VIDEO) {
-    errorOr = rtc_peerconnection_->AddTransceiver(
-        webrtc::MediaType::VIDEO, initImpl->rtp_transceiver_init());
+        kind, initImpl->rtp_transceiver_init());
   }
   if (errorOr.ok()) {
     return new RefCountedObject<RTCRtpTransceiverImpl>(errorOr.value());

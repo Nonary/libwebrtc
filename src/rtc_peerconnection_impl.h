@@ -186,7 +186,7 @@ class RTCPeerConnectionImpl : public RTCPeerConnection,
   webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface>
       rtc_peerconnection_factory_;
   webrtc::scoped_refptr<webrtc::PeerConnectionInterface> rtc_peerconnection_;
-  const RTCConfiguration& configuration_;
+  RTCConfiguration configuration_;
   scoped_refptr<RTCMediaConstraints> constraints_;
   webrtc::PeerConnectionInterface::RTCOfferAnswerOptions offer_answer_options_;
   RTCPeerConnectionObserver* observer_ = nullptr;

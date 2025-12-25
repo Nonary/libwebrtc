@@ -68,6 +68,7 @@ rtc_shared_library("libwebrtc") {
     "include/base/refcountedobject.h",
     "include/base/scoped_ref_ptr.h",
     "include/libwebrtc.h",
+    "include/libwebrtc_c.h",
     "include/rtc_audio_device.h",
     "include/rtc_audio_processing.h",
     "include/rtc_audio_source.h",
@@ -106,6 +107,7 @@ rtc_shared_library("libwebrtc") {
     "src/internal/vcm_capturer.h",
     "src/internal/video_capturer.cc",
     "src/internal/video_capturer.h",
+    "src/libwebrtc_c.cc",
     "src/libwebrtc.cc",
     "src/rtc_audio_device_impl.cc",
     "src/rtc_audio_device_impl.h",
@@ -156,6 +158,8 @@ rtc_shared_library("libwebrtc") {
     "src/rtc_video_track_impl.cc",
     "src/rtc_video_track_impl.h",
     "src/rtc_logging.cc",
+    "src/passthrough_video_encoder.cc",
+    "src/passthrough_video_encoder.h",
   ]
 
   # intel media sdk

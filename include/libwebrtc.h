@@ -35,7 +35,7 @@ class LibWebRTC {
    *
    * Creates a new WebRTC PeerConnectionFactory. This method is thread-safe and
    * can be called from any thread. It creates a new instance of the
-   * RTCPeerConnectionFactoryImpl class and initializes it.
+   * RTCPeerConnectionFactoryImpl class; the caller must invoke Initialize().
    *
    * @return A scoped_refptr object that points to the newly created
    * RTCPeerConnectionFactory.

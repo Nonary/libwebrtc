@@ -9,7 +9,7 @@ namespace libwebrtc {
 VideoSinkAdapter::VideoSinkAdapter(
     webrtc::scoped_refptr<webrtc::VideoTrackInterface> track)
     : rtc_track_(track), crt_sec_(new webrtc::Mutex()) {
-  rtc_track_->AddOrUpdateSink(this, webrtc::VideoSinkWants());
+  rtc_track_->AddOrUpdateSink(this, rtc::VideoSinkWants());
   RTC_LOG(LS_INFO) << __FUNCTION__ << ": ctor " << (void*)this;
 }
 
@@ -56,12 +56,13 @@ void VideoSinkAdapter::RemoveRenderer(
 }
 
 void VideoSinkAdapter::AddRenderer(
-    webrtc::VideoSinkInterface<webrtc::VideoFrame>* renderer) {
-  rtc_track_->AddOrUpdateSink(renderer, webrtc::VideoSinkWants());
+    rtc::VideoSinkInterface<webrtc::VideoFrame>* renderer) {
+  rtc_track_->AddOrUpdateSink(renderer, rtc::VideoSinkWants());
 }
 void VideoSinkAdapter::RemoveRenderer(
-    webrtc::VideoSinkInterface<webrtc::VideoFrame>* renderer) {
+    rtc::VideoSinkInterface<webrtc::VideoFrame>* renderer) {
   rtc_track_->RemoveSink(renderer);
 }
 
 }  // namespace libwebrtc
+
