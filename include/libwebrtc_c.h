@@ -24,6 +24,7 @@ typedef struct lwrtc_data_channel lwrtc_data_channel_t;
 typedef enum lwrtc_video_codec {
   LWRTC_VIDEO_CODEC_H264 = 0,
   LWRTC_VIDEO_CODEC_H265 = 1,
+  LWRTC_VIDEO_CODEC_AV1 = 2,
 } lwrtc_video_codec_t;
 
 typedef struct lwrtc_config {
@@ -67,10 +68,17 @@ LIB_WEBRTC_API int lwrtc_factory_initialize(lwrtc_factory_t* factory);
 // Enable passthrough mode for the factory.
 // Must be called BEFORE lwrtc_factory_initialize().
 // When enabled, the factory will use the PassthroughVideoEncoder
-// which accepts pre-encoded H.264/HEVC frames.
+// which accepts pre-encoded H.264/HEVC/AV1 frames.
 LIB_WEBRTC_API int lwrtc_factory_enable_passthrough(
     lwrtc_factory_t* factory,
     lwrtc_video_codec_t codec);
+// Optional AV1 fmtp overrides used to match remote offers.
+// Must be called BEFORE lwrtc_factory_initialize().
+LIB_WEBRTC_API int lwrtc_factory_set_passthrough_av1_params(
+    lwrtc_factory_t* factory,
+    const char* profile,
+    const char* level_idx,
+    const char* tier);
 LIB_WEBRTC_API void lwrtc_factory_release(lwrtc_factory_t* factory);
 
 LIB_WEBRTC_API lwrtc_constraints_t* lwrtc_constraints_create();
@@ -223,7 +231,7 @@ LIB_WEBRTC_API void lwrtc_data_channel_release(lwrtc_data_channel_t* channel);
 // without re-encoding (passthrough mode)
 
 // Create an encoded video source with passthrough encoder.
-// codec: LWRTC_VIDEO_CODEC_H264 or LWRTC_VIDEO_CODEC_H265
+// codec: LWRTC_VIDEO_CODEC_H264, LWRTC_VIDEO_CODEC_H265, or LWRTC_VIDEO_CODEC_AV1
 // width/height: initial video dimensions (can be updated via push)
 LIB_WEBRTC_API lwrtc_encoded_video_source_t* lwrtc_encoded_video_source_create(
     lwrtc_factory_t* factory,

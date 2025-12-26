@@ -8,6 +8,7 @@
 #include <sstream>
 
 #include "api/video_codecs/video_codec.h"
+#include "media/base/media_constants.h"
 #include "modules/video_coding/include/video_codec_interface.h"
 #include "modules/video_coding/include/video_error_codes.h"
 #include "rtc_base/logging.h"
@@ -446,36 +447,55 @@ std::vector<webrtc::SdpVideoFormat>
 PassthroughVideoEncoderFactory::GetSupportedFormats() const {
   std::vector<webrtc::SdpVideoFormat> formats;
 
-  // H.264 Constrained Baseline
-  formats.push_back(webrtc::SdpVideoFormat(
-      "H264",
-      {{"level-asymmetry-allowed", "1"},
-       {"packetization-mode", "1"},
-       {"profile-level-id", "42e01f"}}));
+  const bool prefer_h264 =
+      !preferred_codec_ || *preferred_codec_ == webrtc::kVideoCodecH264;
+  const bool prefer_h265 =
+      !preferred_codec_ || *preferred_codec_ == webrtc::kVideoCodecH265;
+  const bool prefer_av1 =
+      !preferred_codec_ || *preferred_codec_ == webrtc::kVideoCodecAV1;
 
-  // H.264 Baseline
-  formats.push_back(webrtc::SdpVideoFormat(
-      "H264",
-      {{"level-asymmetry-allowed", "1"},
-       {"packetization-mode", "1"},
-       {"profile-level-id", "42001f"}}));
+  if (prefer_h264) {
+    // H.264 Constrained Baseline
+    formats.push_back(webrtc::SdpVideoFormat(
+        "H264",
+        {{"level-asymmetry-allowed", "1"},
+         {"packetization-mode", "1"},
+         {"profile-level-id", "42e01f"}}));
 
-  // H.264 Main
-  formats.push_back(webrtc::SdpVideoFormat(
-      "H264",
-      {{"level-asymmetry-allowed", "1"},
-       {"packetization-mode", "1"},
-       {"profile-level-id", "4d001f"}}));
+    // H.264 Baseline
+    formats.push_back(webrtc::SdpVideoFormat(
+        "H264",
+        {{"level-asymmetry-allowed", "1"},
+         {"packetization-mode", "1"},
+         {"profile-level-id", "42001f"}}));
 
-  // H.264 High
-  formats.push_back(webrtc::SdpVideoFormat(
-      "H264",
-      {{"level-asymmetry-allowed", "1"},
-       {"packetization-mode", "1"},
-       {"profile-level-id", "64001f"}}));
+    // H.264 Main
+    formats.push_back(webrtc::SdpVideoFormat(
+        "H264",
+        {{"level-asymmetry-allowed", "1"},
+         {"packetization-mode", "1"},
+         {"profile-level-id", "4d001f"}}));
 
-  // H.265/HEVC
-  formats.push_back(webrtc::SdpVideoFormat("H265"));
+    // H.264 High
+    formats.push_back(webrtc::SdpVideoFormat(
+        "H264",
+        {{"level-asymmetry-allowed", "1"},
+         {"packetization-mode", "1"},
+         {"profile-level-id", "64001f"}}));
+  }
+
+  if (prefer_h265) {
+    // H.265/HEVC
+    formats.push_back(webrtc::SdpVideoFormat("H265"));
+  }
+
+  if (prefer_av1) {
+    if (av1_parameters_) {
+      formats.push_back(webrtc::SdpVideoFormat("AV1", *av1_parameters_));
+    } else {
+      formats.push_back(webrtc::SdpVideoFormat::AV1Profile0());
+    }
+  }
 
   return formats;
 }
@@ -485,10 +505,28 @@ std::unique_ptr<webrtc::VideoEncoder> PassthroughVideoEncoderFactory::Create(
     const webrtc::SdpVideoFormat& format) {
   webrtc::VideoCodecType codec_type = webrtc::kVideoCodecH264;
 
-  if (format.name == "H264") {
+  const bool is_h264 = format.name == "H264";
+  const bool is_h265 = (format.name == "H265" || format.name == "HEVC");
+  const bool is_av1 = format.name == "AV1";
+
+  if (preferred_codec_) {
+    const bool allowed =
+        (*preferred_codec_ == webrtc::kVideoCodecH264 && is_h264) ||
+        (*preferred_codec_ == webrtc::kVideoCodecH265 && is_h265) ||
+        (*preferred_codec_ == webrtc::kVideoCodecAV1 && is_av1);
+    if (!allowed) {
+      RTC_LOG(LS_WARNING) << "PassthroughVideoEncoderFactory: codec not allowed "
+                          << format.name;
+      return nullptr;
+    }
+  }
+
+  if (is_h264) {
     codec_type = webrtc::kVideoCodecH264;
-  } else if (format.name == "H265" || format.name == "HEVC") {
+  } else if (is_h265) {
     codec_type = webrtc::kVideoCodecH265;
+  } else if (is_av1) {
+    codec_type = webrtc::kVideoCodecAV1;
   } else {
     RTC_LOG(LS_WARNING) << "PassthroughVideoEncoderFactory: unsupported codec "
                         << format.name;
@@ -518,10 +556,29 @@ PassthroughVideoEncoderFactory::QueryCodecSupport(
     const webrtc::SdpVideoFormat& format,
     absl::optional<std::string> /*scalability_mode*/) const {
   CodecSupport support;
-  support.is_supported = (format.name == "H264" || format.name == "H265" ||
-                          format.name == "HEVC");
+  const bool is_h264 = format.name == "H264";
+  const bool is_h265 = (format.name == "H265" || format.name == "HEVC");
+  const bool is_av1 = format.name == "AV1";
+  if (preferred_codec_) {
+    support.is_supported =
+        (*preferred_codec_ == webrtc::kVideoCodecH264 && is_h264) ||
+        (*preferred_codec_ == webrtc::kVideoCodecH265 && is_h265) ||
+        (*preferred_codec_ == webrtc::kVideoCodecAV1 && is_av1);
+  } else {
+    support.is_supported = is_h264 || is_h265 || is_av1;
+  }
   support.is_power_efficient = true;  // Pre-encoded, so very power efficient
   return support;
+}
+
+void PassthroughVideoEncoderFactory::SetPreferredCodec(
+    webrtc::VideoCodecType codec) {
+  preferred_codec_ = codec;
+}
+
+void PassthroughVideoEncoderFactory::SetAv1Parameters(
+    std::optional<webrtc::CodecParameterMap> params) {
+  av1_parameters_ = std::move(params);
 }
 
 PassthroughVideoEncoder* PassthroughVideoEncoderFactory::GetActiveEncoder() {

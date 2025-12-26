@@ -3,6 +3,7 @@
 #include <cstring>
 #include <memory>
 #include <new>
+#include <optional>
 #include <string>
 
 #include "api/scoped_refptr.h"
@@ -11,6 +12,7 @@
 #include "api/video/nv12_buffer.h"
 #include "api/video/video_frame.h"
 #include "api/video/video_rotation.h"
+#include "api/video_codecs/sdp_video_format.h"
 #include "base/refcountedobject.h"
 #include "rtc_base/ref_counted_object.h"
 #include "libwebrtc.h"
@@ -25,6 +27,20 @@
 #include "src/internal/vcm_capturer.h"
 #include "src/passthrough_video_encoder.h"
 #include "third_party/libyuv/include/libyuv.h"
+
+namespace {
+webrtc::VideoCodecType ToWebrtcCodec(lwrtc_video_codec_t codec) {
+  switch (codec) {
+    case LWRTC_VIDEO_CODEC_H265:
+      return webrtc::kVideoCodecH265;
+    case LWRTC_VIDEO_CODEC_AV1:
+      return webrtc::kVideoCodecAV1;
+    case LWRTC_VIDEO_CODEC_H264:
+    default:
+      return webrtc::kVideoCodecH264;
+  }
+}
+}  // namespace
 
 #ifdef _WIN32
 #include <d3d11.h>
@@ -42,6 +58,9 @@ struct lwrtc_factory {
   owt::base::PassthroughVideoEncoderFactory* passthrough_factory = nullptr;
   lwrtc_video_codec_t passthrough_codec = LWRTC_VIDEO_CODEC_H264;
   bool use_passthrough = false;
+  std::optional<std::string> av1_profile;
+  std::optional<std::string> av1_level_idx;
+  std::optional<std::string> av1_tier;
 };
 
 struct lwrtc_constraints {
@@ -213,6 +232,15 @@ int lwrtc_factory_initialize(lwrtc_factory_t* factory) {
       // the encoder from the factory we pass in.
       auto passthrough_factory =
           std::make_unique<owt::base::PassthroughVideoEncoderFactory>();
+      passthrough_factory->SetPreferredCodec(
+          ToWebrtcCodec(factory->passthrough_codec));
+      if (factory->av1_profile || factory->av1_level_idx || factory->av1_tier) {
+        webrtc::CodecParameterMap params;
+        params["profile"] = factory->av1_profile.value_or("0");
+        params["level-idx"] = factory->av1_level_idx.value_or("5");
+        params["tier"] = factory->av1_tier.value_or("0");
+        passthrough_factory->SetAv1Parameters(std::move(params));
+      }
       factory->passthrough_factory = passthrough_factory.get();
       impl->SetVideoEncoderFactory(std::move(passthrough_factory));
     } else {
@@ -240,6 +268,37 @@ int lwrtc_factory_enable_passthrough(
   }
   factory->use_passthrough = true;
   factory->passthrough_codec = codec;
+  return 1;
+}
+
+int lwrtc_factory_set_passthrough_av1_params(
+    lwrtc_factory_t* factory,
+    const char* profile,
+    const char* level_idx,
+    const char* tier) {
+  if (!factory) {
+    return 0;
+  }
+  if (factory->handle) {
+    // Too late to update parameters after initialization.
+    return 0;
+  }
+
+  if (profile && *profile) {
+    factory->av1_profile = profile;
+  } else {
+    factory->av1_profile.reset();
+  }
+  if (level_idx && *level_idx) {
+    factory->av1_level_idx = level_idx;
+  } else {
+    factory->av1_level_idx.reset();
+  }
+  if (tier && *tier) {
+    factory->av1_tier = tier;
+  } else {
+    factory->av1_tier.reset();
+  }
   return 1;
 }
 
@@ -895,9 +954,7 @@ int lwrtc_encoded_video_source_push(
   frame.height = source->height;
   frame.timestamp_us = timestamp_us;
   frame.is_keyframe = is_keyframe != 0;
-  frame.codec_type = (source->codec == LWRTC_VIDEO_CODEC_H264)
-                         ? webrtc::kVideoCodecH264
-                         : webrtc::kVideoCodecH265;
+  frame.codec_type = ToWebrtcCodec(source->codec);
 
   return encoder->PushEncodedFrame(frame) ? 1 : 0;
 }

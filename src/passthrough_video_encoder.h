@@ -10,6 +10,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 #include "api/video_codecs/video_codec.h"
@@ -21,7 +22,7 @@ namespace base {
 
 // Pre-encoded frame data structure
 struct EncodedFrameData {
-  std::vector<uint8_t> data;         // H.264/HEVC NAL units (Annex B format)
+  std::vector<uint8_t> data;         // H.264/HEVC NAL units (Annex B) or AV1 OBUs
   int width = 0;
   int height = 0;
   int64_t timestamp_us = 0;
@@ -32,7 +33,7 @@ struct EncodedFrameData {
 // Callback type for keyframe (IDR) requests triggered by PLI/FIR
 using KeyframeRequestCallback = std::function<void()>;
 
-// A "passthrough" video encoder that accepts pre-encoded H.264/HEVC frames
+// A "passthrough" video encoder that accepts pre-encoded H.264/HEVC/AV1 frames
 // and passes them through to the WebRTC RTP pipeline without re-encoding.
 //
 // Usage:
@@ -117,7 +118,7 @@ class PassthroughVideoEncoder : public webrtc::VideoEncoder {
 };
 
 // Factory for creating PassthroughVideoEncoder instances.
-// This factory advertises support for H.264 and H.265 codecs.
+// This factory advertises support for H.264, H.265, and AV1 codecs.
 class PassthroughVideoEncoderFactory : public webrtc::VideoEncoderFactory {
  public:
   PassthroughVideoEncoderFactory();
@@ -133,6 +134,9 @@ class PassthroughVideoEncoderFactory : public webrtc::VideoEncoderFactory {
       const webrtc::SdpVideoFormat& format,
       absl::optional<std::string> scalability_mode) const override;
 
+  void SetPreferredCodec(webrtc::VideoCodecType codec);
+  void SetAv1Parameters(std::optional<webrtc::CodecParameterMap> params);
+
   // Get the currently active encoder instance (for frame injection)
   // Returns nullptr if no encoder has been created yet.
   PassthroughVideoEncoder* GetActiveEncoder();
@@ -143,6 +147,8 @@ class PassthroughVideoEncoderFactory : public webrtc::VideoEncoderFactory {
  private:
   PassthroughVideoEncoder* active_encoder_ = nullptr;
   KeyframeRequestCallback pending_keyframe_cb_;
+  std::optional<webrtc::VideoCodecType> preferred_codec_;
+  std::optional<webrtc::CodecParameterMap> av1_parameters_;
   std::mutex mutex_;
 };
 
