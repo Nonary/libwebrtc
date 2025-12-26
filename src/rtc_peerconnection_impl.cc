@@ -463,6 +463,9 @@ bool RTCPeerConnectionImpl::Initialize() {
   }
 
   rtc_peerconnection_ = result.MoveValue();
+  // Sunshine supplies custom audio frames; disable ADM recording to avoid
+  // concurrent audio sources feeding the same send stream.
+  rtc_peerconnection_->SetAudioRecording(false);
   return true;
 }
 
