@@ -4,9 +4,11 @@
 #include "passthrough_video_encoder.h"
 
 #include <algorithm>
+#include <cstring>
 #include <iomanip>
 #include <sstream>
 
+#include "api/video/encoded_image.h"
 #include "api/video_codecs/video_codec.h"
 #include "media/base/media_constants.h"
 #include "modules/video_coding/include/video_codec_interface.h"
@@ -178,15 +180,17 @@ bool PassthroughVideoEncoder::PushEncodedFrame(const EncodedFrameData& frame) {
     return false;
   }
 
-  if (frame.data.empty()) {
+  const uint8_t* frame_data = frame.buffer ? frame.buffer->data() : nullptr;
+  const size_t frame_size = frame.buffer ? frame.buffer->size() : 0;
+  if (!frame_data || frame_size == 0) {
     RTC_LOG(LS_WARNING) << "PassthroughVideoEncoder: empty frame data";
     return false;
   }
 
   if (codec_type_ == webrtc::kVideoCodecH264 || codec_type_ == webrtc::kVideoCodecH265) {
-    if (!StartsWithAnnexBStartCode(frame.data.data(), frame.data.size())) {
+    if (!StartsWithAnnexBStartCode(frame_data, frame_size)) {
       RTC_LOG(LS_WARNING) << "PassthroughVideoEncoder: encoded frame does not start with Annex B start code; prefix="
-                          << HexPrefix(frame.data.data(), frame.data.size());
+                          << HexPrefix(frame_data, frame_size);
     }
   }
 
@@ -199,19 +203,21 @@ bool PassthroughVideoEncoder::PushEncodedFrame(const EncodedFrameData& frame) {
   // For keyframes, extract and cache parameter sets
   if (frame.is_keyframe) {
     if (codec_type_ == webrtc::kVideoCodecH264) {
-      ExtractH264ParameterSets(frame.data.data(), frame.data.size());
+      ExtractH264ParameterSets(frame_data, frame_size);
     } else if (codec_type_ == webrtc::kVideoCodecH265) {
-      ExtractHEVCParameterSets(frame.data.data(), frame.data.size());
+      ExtractHEVCParameterSets(frame_data, frame_size);
     }
   }
 
-  // Prepare the output data - prepend parameter sets if needed
-  std::vector<uint8_t> output_data;
+  // Prepare the output buffer - prepend parameter sets if needed
+  rtc::scoped_refptr<webrtc::EncodedImageBufferInterface> output_buffer = frame.buffer;
   if (frame.is_keyframe && has_parameter_sets_ &&
-      !ContainsParameterSets(frame.data.data(), frame.data.size())) {
-    PrependParameterSets(frame.data, output_data);
-  } else {
-    output_data = frame.data;
+      !ContainsParameterSets(frame_data, frame_size)) {
+    output_buffer = PrependParameterSets(frame_data, frame_size);
+  }
+  if (!output_buffer) {
+    RTC_LOG(LS_WARNING) << "PassthroughVideoEncoder: output buffer is null";
+    return false;
   }
 
   // Build EncodedImage
@@ -228,8 +234,7 @@ bool PassthroughVideoEncoder::PushEncodedFrame(const EncodedFrameData& frame) {
       ? webrtc::VideoFrameType::kVideoFrameKey
       : webrtc::VideoFrameType::kVideoFrameDelta;
 
-  encoded_image.SetEncodedData(
-      webrtc::EncodedImageBuffer::Create(output_data.data(), output_data.size()));
+  encoded_image.SetEncodedData(output_buffer);
 
   // Build codec-specific info
   webrtc::CodecSpecificInfo codec_info;
@@ -413,24 +418,45 @@ bool PassthroughVideoEncoder::ContainsParameterSets(
   return false;
 }
 
-void PassthroughVideoEncoder::PrependParameterSets(
-    const std::vector<uint8_t>& input,
-    std::vector<uint8_t>& output) {
-  if (codec_type_ == webrtc::kVideoCodecH264) {
-    output.reserve(cached_sps_.size() + cached_pps_.size() + input.size());
-    output.insert(output.end(), cached_sps_.begin(), cached_sps_.end());
-    output.insert(output.end(), cached_pps_.begin(), cached_pps_.end());
-    output.insert(output.end(), input.begin(), input.end());
-  } else if (codec_type_ == webrtc::kVideoCodecH265) {
-    output.reserve(cached_vps_.size() + cached_hevc_sps_.size() +
-                   cached_hevc_pps_.size() + input.size());
-    output.insert(output.end(), cached_vps_.begin(), cached_vps_.end());
-    output.insert(output.end(), cached_hevc_sps_.begin(), cached_hevc_sps_.end());
-    output.insert(output.end(), cached_hevc_pps_.begin(), cached_hevc_pps_.end());
-    output.insert(output.end(), input.begin(), input.end());
-  } else {
-    output = input;
+rtc::scoped_refptr<webrtc::EncodedImageBufferInterface>
+PassthroughVideoEncoder::PrependParameterSets(const uint8_t* data, size_t size) {
+  if (!data || size == 0) {
+    return nullptr;
   }
+
+  auto append = [](uint8_t* dst, size_t& offset, const std::vector<uint8_t>& src) {
+    if (src.empty()) {
+      return;
+    }
+    memcpy(dst + offset, src.data(), src.size());
+    offset += src.size();
+  };
+
+  size_t total_size = 0;
+  if (codec_type_ == webrtc::kVideoCodecH264) {
+    total_size = cached_sps_.size() + cached_pps_.size() + size;
+  } else if (codec_type_ == webrtc::kVideoCodecH265) {
+    total_size =
+        cached_vps_.size() + cached_hevc_sps_.size() + cached_hevc_pps_.size() + size;
+  } else {
+    total_size = size;
+  }
+
+  auto output = webrtc::EncodedImageBuffer::Create(total_size);
+  size_t offset = 0;
+  uint8_t* out_data = output->data();
+
+  if (codec_type_ == webrtc::kVideoCodecH264) {
+    append(out_data, offset, cached_sps_);
+    append(out_data, offset, cached_pps_);
+  } else if (codec_type_ == webrtc::kVideoCodecH265) {
+    append(out_data, offset, cached_vps_);
+    append(out_data, offset, cached_hevc_sps_);
+    append(out_data, offset, cached_hevc_pps_);
+  }
+
+  memcpy(out_data + offset, data, size);
+  return output;
 }
 
 // PassthroughVideoEncoderFactory implementation

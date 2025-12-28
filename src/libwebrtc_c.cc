@@ -7,6 +7,7 @@
 #include <string>
 
 #include "api/scoped_refptr.h"
+#include "api/video/encoded_image.h"
 #include "api/video/i420_buffer.h"
 #include "api/video/video_frame_buffer.h"
 #include "api/video/nv12_buffer.h"
@@ -908,6 +909,35 @@ void lwrtc_encoded_video_source_release(lwrtc_encoded_video_source_t* source) {
 namespace {
 constexpr int64_t kDummyPushIntervalUs = 200000;
 
+class ExternalEncodedImageBuffer : public webrtc::EncodedImageBufferInterface {
+ public:
+  ExternalEncodedImageBuffer(const uint8_t* data,
+                             size_t size,
+                             lwrtc_buffer_release_cb release_cb,
+                             void* release_user)
+      : data_(data),
+        size_(size),
+        release_cb_(release_cb),
+        release_user_(release_user) {}
+
+  const uint8_t* data() const override { return data_; }
+  uint8_t* data() override { return const_cast<uint8_t*>(data_); }
+  size_t size() const override { return size_; }
+
+ private:
+  friend class rtc::RefCountedObject<ExternalEncodedImageBuffer>;
+  ~ExternalEncodedImageBuffer() override {
+    if (release_cb_) {
+      release_cb_(release_user_);
+    }
+  }
+
+  const uint8_t* const data_;
+  const size_t size_;
+  const lwrtc_buffer_release_cb release_cb_;
+  void* const release_user_;
+};
+
 void PushDummyFrameIfNeeded(lwrtc_encoded_video_source_t* source,
                             int64_t timestamp_us) {
   if (!source || !source->capturer) {
@@ -992,7 +1022,81 @@ int lwrtc_encoded_video_source_push(
   PushDummyFrameIfNeeded(source, timestamp_us);
 
   owt::base::EncodedFrameData frame;
-  frame.data.assign(data, data + size);
+  frame.buffer = webrtc::EncodedImageBuffer::Create(data, size);
+  frame.width = source->width;
+  frame.height = source->height;
+  frame.timestamp_us = timestamp_us;
+  frame.is_keyframe = is_keyframe != 0;
+  frame.codec_type = ToWebrtcCodec(source->codec);
+
+  return encoder->PushEncodedFrame(frame) ? 1 : 0;
+}
+
+int lwrtc_encoded_video_source_push_shared(
+    lwrtc_encoded_video_source_t* source,
+    const uint8_t* data,
+    size_t size,
+    int64_t timestamp_us,
+    int is_keyframe,
+    lwrtc_buffer_release_cb release_cb,
+    void* release_user) {
+  if (!source || !data || size == 0) {
+    if (release_cb) {
+      release_cb(release_user);
+    }
+    return 0;
+  }
+
+  if (!source->factory || !source->factory->handle) {
+    if (release_cb) {
+      release_cb(release_user);
+    }
+    return 0;
+  }
+
+  auto* passthrough_factory = source->factory->passthrough_factory;
+  if (!passthrough_factory) {
+    if (release_cb) {
+      release_cb(release_user);
+    }
+    return 0;
+  }
+  auto* encoder = passthrough_factory->GetActiveEncoder();
+  if (!encoder) {
+    // Encoder not yet created by WebRTC - push a dummy frame through the
+    // capturer to trigger encoder creation
+    if (source->capturer && !source->encoder_ready) {
+      // Create a black I420 frame to trigger the encoding pipeline
+      auto i420_buffer = webrtc::I420Buffer::Create(source->width, source->height);
+      // Fill with black (Y=0, U=128, V=128)
+      memset(i420_buffer->MutableDataY(), 0,
+             i420_buffer->StrideY() * source->height);
+      memset(i420_buffer->MutableDataU(), 128,
+             i420_buffer->StrideU() * ((source->height + 1) / 2));
+      memset(i420_buffer->MutableDataV(), 128,
+             i420_buffer->StrideV() * ((source->height + 1) / 2));
+
+      webrtc::VideoFrame video_frame = webrtc::VideoFrame::Builder()
+          .set_video_frame_buffer(i420_buffer)
+          .set_timestamp_us(timestamp_us)
+          .set_rotation(webrtc::kVideoRotation_0)
+          .build();
+
+      source->capturer->PushFrame(video_frame);
+    }
+    if (release_cb) {
+      release_cb(release_user);
+    }
+    return 0;  // Frame not pushed to encoder yet, will be discarded
+  }
+
+  // Encoder is ready - mark it and stop pushing dummy frames
+  source->encoder_ready = true;
+  PushDummyFrameIfNeeded(source, timestamp_us);
+
+  owt::base::EncodedFrameData frame;
+  frame.buffer = new rtc::RefCountedObject<ExternalEncodedImageBuffer>(
+      data, size, release_cb, release_user);
   frame.width = source->width;
   frame.height = source->height;
   frame.timestamp_us = timestamp_us;

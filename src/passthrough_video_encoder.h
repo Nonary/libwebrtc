@@ -13,6 +13,7 @@
 #include <optional>
 #include <vector>
 
+#include "api/video/encoded_image.h"
 #include "api/video_codecs/video_codec.h"
 #include "api/video_codecs/video_encoder.h"
 #include "api/video_codecs/video_encoder_factory.h"
@@ -22,7 +23,7 @@ namespace base {
 
 // Pre-encoded frame data structure
 struct EncodedFrameData {
-  std::vector<uint8_t> data;         // H.264/HEVC NAL units (Annex B) or AV1 OBUs
+  rtc::scoped_refptr<webrtc::EncodedImageBufferInterface> buffer;  // H.264/HEVC NAL units (Annex B) or AV1 OBUs
   int width = 0;
   int height = 0;
   int64_t timestamp_us = 0;
@@ -82,8 +83,9 @@ class PassthroughVideoEncoder : public webrtc::VideoEncoder {
   void ExtractHEVCParameterSets(const uint8_t* data, size_t size);
 
   // Prepend cached parameter sets to the output buffer
-  void PrependParameterSets(const std::vector<uint8_t>& input,
-                            std::vector<uint8_t>& output);
+  rtc::scoped_refptr<webrtc::EncodedImageBufferInterface> PrependParameterSets(
+      const uint8_t* data,
+      size_t size);
 
   // Find next NAL unit start code position
   size_t FindNextNalStart(const uint8_t* data, size_t size, size_t start_pos);

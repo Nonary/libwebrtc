@@ -52,6 +52,11 @@ typedef void (*lwrtc_err_cb)(void* user, const char* error);
 // Callback for keyframe (IDR) requests triggered by PLI/FIR from receiver
 typedef void (*lwrtc_keyframe_request_cb)(void* user);
 
+// Callback for releasing externally owned encoded frame buffers.
+// Called exactly once when WebRTC no longer needs the buffer (or immediately if
+// the frame is dropped before entering the pipeline).
+typedef void (*lwrtc_buffer_release_cb)(void* user);
+
 typedef enum lwrtc_data_channel_state {
   LWRTC_DATA_CHANNEL_CONNECTING = 0,
   LWRTC_DATA_CHANNEL_OPEN = 1,
@@ -255,6 +260,18 @@ LIB_WEBRTC_API int lwrtc_encoded_video_source_push(
     size_t size,
     int64_t timestamp_us,
     int is_keyframe);
+
+// Push a pre-encoded frame to the WebRTC pipeline without copying the payload.
+// The caller retains ownership of `data` until `release_cb` is invoked.
+// Returns 1 on success, 0 on failure.
+LIB_WEBRTC_API int lwrtc_encoded_video_source_push_shared(
+    lwrtc_encoded_video_source_t* source,
+    const uint8_t* data,
+    size_t size,
+    int64_t timestamp_us,
+    int is_keyframe,
+    lwrtc_buffer_release_cb release_cb,
+    void* release_user);
 
 // Set callback for keyframe requests (PLI/FIR from receiver).
 // When called, the application should request an IDR from the upstream encoder.
