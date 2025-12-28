@@ -95,6 +95,10 @@ struct lwrtc_encoded_video_source {
   // Capturer for pushing dummy frames to trigger encoder creation
   std::shared_ptr<PushVideoCapturer> capturer;
   bool encoder_ready = false;
+  int64_t last_dummy_push_us = 0;
+  rtc::scoped_refptr<webrtc::I420Buffer> dummy_buffer;
+  int dummy_width = 0;
+  int dummy_height = 0;
 };
 
 struct lwrtc_audio_track {
@@ -901,6 +905,44 @@ void lwrtc_encoded_video_source_release(lwrtc_encoded_video_source_t* source) {
   delete source;
 }
 
+namespace {
+constexpr int64_t kDummyPushIntervalUs = 200000;
+
+void PushDummyFrameIfNeeded(lwrtc_encoded_video_source_t* source,
+                            int64_t timestamp_us) {
+  if (!source || !source->capturer) {
+    return;
+  }
+  if (source->last_dummy_push_us != 0 &&
+      timestamp_us - source->last_dummy_push_us < kDummyPushIntervalUs) {
+    return;
+  }
+  if (source->width <= 0 || source->height <= 0) {
+    return;
+  }
+  if (!source->dummy_buffer || source->dummy_width != source->width ||
+      source->dummy_height != source->height) {
+    source->dummy_buffer = webrtc::I420Buffer::Create(source->width, source->height);
+    source->dummy_width = source->width;
+    source->dummy_height = source->height;
+    memset(source->dummy_buffer->MutableDataY(), 0,
+           source->dummy_buffer->StrideY() * source->height);
+    memset(source->dummy_buffer->MutableDataU(), 128,
+           source->dummy_buffer->StrideU() * ((source->height + 1) / 2));
+    memset(source->dummy_buffer->MutableDataV(), 128,
+           source->dummy_buffer->StrideV() * ((source->height + 1) / 2));
+  }
+
+  webrtc::VideoFrame video_frame = webrtc::VideoFrame::Builder()
+      .set_video_frame_buffer(source->dummy_buffer)
+      .set_timestamp_us(timestamp_us)
+      .set_rotation(webrtc::kVideoRotation_0)
+      .build();
+  source->capturer->PushFrame(video_frame);
+  source->last_dummy_push_us = timestamp_us;
+}
+}  // namespace
+
 int lwrtc_encoded_video_source_push(
     lwrtc_encoded_video_source_t* source,
     const uint8_t* data,
@@ -947,6 +989,7 @@ int lwrtc_encoded_video_source_push(
 
   // Encoder is ready - mark it and stop pushing dummy frames
   source->encoder_ready = true;
+  PushDummyFrameIfNeeded(source, timestamp_us);
 
   owt::base::EncodedFrameData frame;
   frame.data.assign(data, data + size);
