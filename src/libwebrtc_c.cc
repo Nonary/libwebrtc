@@ -5,6 +5,7 @@
 #include <new>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "api/scoped_refptr.h"
 #include "api/video/encoded_image.h"
@@ -41,6 +42,40 @@ webrtc::VideoCodecType ToWebrtcCodec(lwrtc_video_codec_t codec) {
       return webrtc::kVideoCodecH264;
   }
 }
+
+std::string_view TrimAscii(std::string_view value) {
+  while (!value.empty() && (value.front() == ' ' || value.front() == '\t')) {
+    value.remove_prefix(1);
+  }
+  while (!value.empty() && (value.back() == ' ' || value.back() == '\t')) {
+    value.remove_suffix(1);
+  }
+  return value;
+}
+
+webrtc::CodecParameterMap ParseFmtpParameters(std::string_view fmtp) {
+  webrtc::CodecParameterMap params;
+  std::size_t token_start = 0;
+  while (token_start < fmtp.size()) {
+    std::size_t token_end = fmtp.find(';', token_start);
+    if (token_end == std::string_view::npos) {
+      token_end = fmtp.size();
+    }
+    auto token = TrimAscii(fmtp.substr(token_start, token_end - token_start));
+    if (!token.empty()) {
+      const std::size_t eq = token.find('=');
+      if (eq != std::string_view::npos) {
+        auto key = TrimAscii(token.substr(0, eq));
+        auto value = TrimAscii(token.substr(eq + 1));
+        if (!key.empty()) {
+          params[std::string {key}] = std::string {value};
+        }
+      }
+    }
+    token_start = token_end + 1;
+  }
+  return params;
+}
 }  // namespace
 
 #ifdef _WIN32
@@ -59,6 +94,7 @@ struct lwrtc_factory {
   owt::base::PassthroughVideoEncoderFactory* passthrough_factory = nullptr;
   lwrtc_video_codec_t passthrough_codec = LWRTC_VIDEO_CODEC_H264;
   bool use_passthrough = false;
+  std::optional<webrtc::CodecParameterMap> hevc_parameters;
   std::optional<std::string> av1_profile;
   std::optional<std::string> av1_level_idx;
   std::optional<std::string> av1_tier;
@@ -239,6 +275,9 @@ int lwrtc_factory_initialize(lwrtc_factory_t* factory) {
           std::make_unique<owt::base::PassthroughVideoEncoderFactory>();
       passthrough_factory->SetPreferredCodec(
           ToWebrtcCodec(factory->passthrough_codec));
+      if (factory->hevc_parameters) {
+        passthrough_factory->SetH265Parameters(factory->hevc_parameters);
+      }
       if (factory->av1_profile || factory->av1_level_idx || factory->av1_tier) {
         webrtc::CodecParameterMap params;
         params["profile"] = factory->av1_profile.value_or("0");
@@ -304,6 +343,26 @@ int lwrtc_factory_set_passthrough_av1_params(
   } else {
     factory->av1_tier.reset();
   }
+  return 1;
+}
+
+int lwrtc_factory_set_passthrough_hevc_fmtp(
+    lwrtc_factory_t* factory,
+    const char* fmtp) {
+  if (!factory) {
+    return 0;
+  }
+  if (factory->handle) {
+    // Too late to update parameters after initialization.
+    return 0;
+  }
+
+  if (!fmtp || !*fmtp) {
+    factory->hevc_parameters.reset();
+    return 1;
+  }
+
+  factory->hevc_parameters = ParseFmtpParameters(fmtp);
   return 1;
 }
 

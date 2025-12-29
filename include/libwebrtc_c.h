@@ -84,6 +84,11 @@ LIB_WEBRTC_API int lwrtc_factory_set_passthrough_av1_params(
     const char* profile,
     const char* level_idx,
     const char* tier);
+// Optional HEVC fmtp overrides used to match remote offers.
+// Must be called BEFORE lwrtc_factory_initialize().
+LIB_WEBRTC_API int lwrtc_factory_set_passthrough_hevc_fmtp(
+    lwrtc_factory_t* factory,
+    const char* fmtp);
 LIB_WEBRTC_API void lwrtc_factory_release(lwrtc_factory_t* factory);
 
 LIB_WEBRTC_API lwrtc_constraints_t* lwrtc_constraints_create();

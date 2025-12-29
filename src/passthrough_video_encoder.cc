@@ -512,7 +512,12 @@ PassthroughVideoEncoderFactory::GetSupportedFormats() const {
 
   if (prefer_h265) {
     // H.265/HEVC
+    if (h265_parameters_) {
+      formats.push_back(webrtc::SdpVideoFormat("H265", *h265_parameters_));
+      formats.push_back(webrtc::SdpVideoFormat("HEVC", *h265_parameters_));
+    }
     formats.push_back(webrtc::SdpVideoFormat("H265"));
+    formats.push_back(webrtc::SdpVideoFormat("HEVC"));
   }
 
   if (prefer_av1) {
@@ -600,6 +605,11 @@ PassthroughVideoEncoderFactory::QueryCodecSupport(
 void PassthroughVideoEncoderFactory::SetPreferredCodec(
     webrtc::VideoCodecType codec) {
   preferred_codec_ = codec;
+}
+
+void PassthroughVideoEncoderFactory::SetH265Parameters(
+    std::optional<webrtc::CodecParameterMap> params) {
+  h265_parameters_ = std::move(params);
 }
 
 void PassthroughVideoEncoderFactory::SetAv1Parameters(

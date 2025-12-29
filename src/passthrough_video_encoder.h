@@ -137,6 +137,7 @@ class PassthroughVideoEncoderFactory : public webrtc::VideoEncoderFactory {
       absl::optional<std::string> scalability_mode) const override;
 
   void SetPreferredCodec(webrtc::VideoCodecType codec);
+  void SetH265Parameters(std::optional<webrtc::CodecParameterMap> params);
   void SetAv1Parameters(std::optional<webrtc::CodecParameterMap> params);
 
   // Get the currently active encoder instance (for frame injection)
@@ -150,6 +151,7 @@ class PassthroughVideoEncoderFactory : public webrtc::VideoEncoderFactory {
   PassthroughVideoEncoder* active_encoder_ = nullptr;
   KeyframeRequestCallback pending_keyframe_cb_;
   std::optional<webrtc::VideoCodecType> preferred_codec_;
+  std::optional<webrtc::CodecParameterMap> h265_parameters_;
   std::optional<webrtc::CodecParameterMap> av1_parameters_;
   std::mutex mutex_;
 };
