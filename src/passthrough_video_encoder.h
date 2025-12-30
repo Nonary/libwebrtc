@@ -34,6 +34,9 @@ struct EncodedFrameData {
 // Callback type for keyframe (IDR) requests triggered by PLI/FIR
 using KeyframeRequestCallback = std::function<void()>;
 
+// Forward declaration
+class PassthroughVideoEncoderFactory;
+
 // A "passthrough" video encoder that accepts pre-encoded H.264/HEVC/AV1 frames
 // and passes them through to the WebRTC RTP pipeline without re-encoding.
 //
@@ -44,7 +47,8 @@ using KeyframeRequestCallback = std::function<void()>;
 // 4. When WebRTC requests a keyframe (PLI/FIR), the callback is invoked
 class PassthroughVideoEncoder : public webrtc::VideoEncoder {
  public:
-  explicit PassthroughVideoEncoder(webrtc::VideoCodecType codec_type);
+  PassthroughVideoEncoder(webrtc::VideoCodecType codec_type,
+                          PassthroughVideoEncoderFactory* factory);
   ~PassthroughVideoEncoder() override;
 
   // VideoEncoder interface
@@ -95,6 +99,7 @@ class PassthroughVideoEncoder : public webrtc::VideoEncoder {
 
   webrtc::EncodedImageCallback* callback_ = nullptr;
   webrtc::VideoCodecType codec_type_;
+  PassthroughVideoEncoderFactory* factory_ = nullptr;
   int width_ = 0;
   int height_ = 0;
   uint32_t target_bitrate_bps_ = 0;
@@ -151,6 +156,9 @@ class PassthroughVideoEncoderFactory : public webrtc::VideoEncoderFactory {
 
   // Set the keyframe request callback for the active encoder
   void SetKeyframeRequestCallback(KeyframeRequestCallback callback);
+
+  // Called by encoder when it's being destroyed
+  void OnEncoderDestroyed(PassthroughVideoEncoder* encoder);
 
  private:
   PassthroughVideoEncoder* active_encoder_ = nullptr;

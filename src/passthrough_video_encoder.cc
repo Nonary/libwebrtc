@@ -76,14 +76,18 @@ std::string HexPrefix(const uint8_t* data, size_t size, size_t max_bytes = 8) {
 }  // namespace
 
 PassthroughVideoEncoder::PassthroughVideoEncoder(
-    webrtc::VideoCodecType codec_type)
-    : codec_type_(codec_type) {
+    webrtc::VideoCodecType codec_type,
+    PassthroughVideoEncoderFactory* factory)
+    : codec_type_(codec_type), factory_(factory) {
   RTC_LOG(LS_INFO) << "PassthroughVideoEncoder created for codec type: "
                    << static_cast<int>(codec_type);
 }
 
 PassthroughVideoEncoder::~PassthroughVideoEncoder() {
   RTC_LOG(LS_INFO) << "PassthroughVideoEncoder destroyed";
+  if (factory_) {
+    factory_->OnEncoderDestroyed(this);
+  }
 }
 
 int PassthroughVideoEncoder::InitEncode(
@@ -582,7 +586,7 @@ std::unique_ptr<webrtc::VideoEncoder> PassthroughVideoEncoderFactory::Create(
     return nullptr;
   }
 
-  auto encoder = std::make_unique<PassthroughVideoEncoder>(codec_type);
+  auto encoder = std::make_unique<PassthroughVideoEncoder>(codec_type, this);
 
   // Store reference to active encoder
   {
@@ -648,6 +652,16 @@ void PassthroughVideoEncoderFactory::SetKeyframeRequestCallback(
   // Apply immediately if encoder already exists
   if (active_encoder_) {
     active_encoder_->SetKeyframeRequestCallback(pending_keyframe_cb_);
+  }
+}
+
+void PassthroughVideoEncoderFactory::OnEncoderDestroyed(
+    PassthroughVideoEncoder* encoder) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  // Only clear if this is the active encoder (could be a stale reference)
+  if (active_encoder_ == encoder) {
+    RTC_LOG(LS_INFO) << "PassthroughVideoEncoderFactory: active encoder destroyed";
+    active_encoder_ = nullptr;
   }
 }
 
