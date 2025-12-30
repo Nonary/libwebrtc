@@ -14,6 +14,7 @@
 #include "modules/video_coding/include/video_codec_interface.h"
 #include "modules/video_coding/include/video_error_codes.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/time_utils.h"
 
 namespace owt {
 namespace base {
@@ -97,6 +98,8 @@ int PassthroughVideoEncoder::InitEncode(
   height_ = codec_settings->height;
   target_bitrate_bps_ = codec_settings->startBitrate * 1000;
   frame_rate_ = codec_settings->maxFramerate > 0 ? codec_settings->maxFramerate : 30;
+  timestamp_offset_us_.reset();
+  last_mapped_timestamp_us_ = 0;
 
   RTC_LOG(LS_INFO) << "PassthroughVideoEncoder::InitEncode: "
                    << width_ << "x" << height_ << " @ " << frame_rate_ << "fps";
@@ -171,6 +174,8 @@ int PassthroughVideoEncoder::Release() {
   cached_hevc_sps_.clear();
   cached_hevc_pps_.clear();
   has_parameter_sets_ = false;
+  timestamp_offset_us_.reset();
+  last_mapped_timestamp_us_ = 0;
   return WEBRTC_VIDEO_CODEC_OK;
 }
 
@@ -224,10 +229,23 @@ bool PassthroughVideoEncoder::PushEncodedFrame(const EncodedFrameData& frame) {
   webrtc::EncodedImage encoded_image;
   encoded_image._encodedWidth = width_;
   encoded_image._encodedHeight = height_;
-  encoded_image.capture_time_ms_ = frame.timestamp_us / 1000;
+  int64_t mapped_timestamp_us = frame.timestamp_us;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!timestamp_offset_us_) {
+      timestamp_offset_us_ = rtc::TimeMicros() - frame.timestamp_us;
+      last_mapped_timestamp_us_ = 0;
+    }
+    mapped_timestamp_us = frame.timestamp_us + *timestamp_offset_us_;
+    if (last_mapped_timestamp_us_ != 0 && mapped_timestamp_us <= last_mapped_timestamp_us_) {
+      mapped_timestamp_us = last_mapped_timestamp_us_ + 1;
+    }
+    last_mapped_timestamp_us_ = mapped_timestamp_us;
+  }
+  encoded_image.capture_time_ms_ = mapped_timestamp_us / 1000;
 
   // Convert timestamp to RTP clock rate (90kHz for video)
-  uint32_t rtp_timestamp = static_cast<uint32_t>(frame.timestamp_us * 90 / 1000);
+  uint32_t rtp_timestamp = static_cast<uint32_t>(mapped_timestamp_us * 90 / 1000);
   encoded_image.SetRtpTimestamp(rtp_timestamp);
 
   encoded_image._frameType = frame.is_keyframe

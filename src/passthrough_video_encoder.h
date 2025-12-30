@@ -117,6 +117,11 @@ class PassthroughVideoEncoder : public webrtc::VideoEncoder {
 
   // Flag to track if we've seen the first keyframe
   bool has_parameter_sets_ = false;
+
+  // Map application timestamps onto WebRTC's TimeMicros() timebase to keep
+  // capture_time_ms_ and RTP timestamps consistent with the rest of the stack.
+  std::optional<int64_t> timestamp_offset_us_;
+  int64_t last_mapped_timestamp_us_ = 0;
 };
 
 // Factory for creating PassthroughVideoEncoder instances.
