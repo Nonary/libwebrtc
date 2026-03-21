@@ -14,6 +14,7 @@
 #include "modules/video_coding/include/video_error_codes.h"
 #include "rtc_base/logging.h"
 #include "src/win/d3d11_texture_buffer.h"
+#include "src/win/nvenc_api_compat.h"
 #include "src/win/native_encoder_status.h"
 
 namespace {
@@ -209,16 +210,16 @@ bool NvencVideoEncoder::InitOnD3D11Device(ID3D11Device* device,
   config = {};
   preset_config = {};
 
-  init_params.version = NV_ENC_INITIALIZE_PARAMS_VER;
-  config.version = NV_ENC_CONFIG_VER;
-  preset_config.version = NV_ENC_PRESET_CONFIG_VER;
-  preset_config.presetCfg.version = NV_ENC_CONFIG_VER;
+  init_params.version = nvenc_compat::InitializeParamsVersion();
+  config.version = nvenc_compat::ConfigVersion();
+  preset_config.version = nvenc_compat::PresetConfigVersion();
+  preset_config.presetCfg.version = nvenc_compat::ConfigVersion();
 
   NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS open_params = {};
-  open_params.version = NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER;
+  open_params.version = nvenc_compat::OpenEncodeSessionExParamsVersion();
   open_params.device = device;
   open_params.deviceType = NV_ENC_DEVICE_TYPE_DIRECTX;
-  open_params.apiVersion = NVENCAPI_VERSION;
+  open_params.apiVersion = nvenc_compat::kNvencApiVersion;
 
   if (!nvenc_api_ ||
       nvenc_api_->nvEncOpenEncodeSessionEx(&open_params, &encoder_) !=
@@ -324,7 +325,7 @@ bool NvencVideoEncoder::RegisterNvencInput() {
   }
 
   NV_ENC_REGISTER_RESOURCE register_resource = {};
-  register_resource.version = NV_ENC_REGISTER_RESOURCE_VER;
+  register_resource.version = nvenc_compat::RegisterResourceVersion();
   register_resource.resourceType = NV_ENC_INPUT_RESOURCE_TYPE_DIRECTX;
   register_resource.resourceToRegister = nvenc_input_texture_.Get();
   register_resource.width = width_;
@@ -352,7 +353,7 @@ bool NvencVideoEncoder::CreateBitstreamBuffer() {
   }
 
   NV_ENC_CREATE_BITSTREAM_BUFFER create_buffer = {};
-  create_buffer.version = NV_ENC_CREATE_BITSTREAM_BUFFER_VER;
+  create_buffer.version = nvenc_compat::CreateBitstreamBufferVersion();
   if (nvenc_api_->nvEncCreateBitstreamBuffer(encoder_, &create_buffer) !=
       NvencStatusForOk()) {
     RTC_LOG(LS_ERROR) << "NVENC: failed to create bitstream buffer";
@@ -381,7 +382,7 @@ bool NvencVideoEncoder::ReconfigureIfNeeded() {
   }
 
   NV_ENC_RECONFIGURE_PARAMS reconfig = {};
-  reconfig.version = NV_ENC_RECONFIGURE_PARAMS_VER;
+  reconfig.version = nvenc_compat::ReconfigureParamsVersion();
   reconfig.reInitEncodeParams = init_params;
   reconfig.resetEncoder = 1;
 
@@ -416,7 +417,7 @@ bool NvencVideoEncoder::EncodeFrame(const webrtc::VideoFrame& input_image,
   d3d11_context_->CopyResource(nvenc_input_texture_.Get(), src_texture);
 
   NV_ENC_MAP_INPUT_RESOURCE map_input = {};
-  map_input.version = NV_ENC_MAP_INPUT_RESOURCE_VER;
+  map_input.version = nvenc_compat::MapInputResourceVersion();
   map_input.registeredResource = registered_input_;
   if (nvenc_api_->nvEncMapInputResource(encoder_, &map_input) !=
       NvencStatusForOk()) {
@@ -426,7 +427,7 @@ bool NvencVideoEncoder::EncodeFrame(const webrtc::VideoFrame& input_image,
   mapped_input_ = map_input.mappedResource;
 
   NV_ENC_PIC_PARAMS pic_params = {};
-  pic_params.version = NV_ENC_PIC_PARAMS_VER;
+  pic_params.version = nvenc_compat::PicParamsVersion();
   pic_params.inputBuffer = mapped_input_;
   pic_params.bufferFmt = NV_ENC_BUFFER_FORMAT_NV12;
   pic_params.inputWidth = width_;
@@ -448,7 +449,7 @@ bool NvencVideoEncoder::EncodeFrame(const webrtc::VideoFrame& input_image,
   mapped_input_ = nullptr;
 
   NV_ENC_LOCK_BITSTREAM lock_bitstream = {};
-  lock_bitstream.version = NV_ENC_LOCK_BITSTREAM_VER;
+  lock_bitstream.version = nvenc_compat::LockBitstreamVersion();
   lock_bitstream.outputBitstream = bitstream_buffer_;
   lock_bitstream.doNotWait = 0;
   if (nvenc_api_->nvEncLockBitstream(encoder_, &lock_bitstream) !=
@@ -511,7 +512,7 @@ bool NvencVideoEncoder::LoadNvencApi() {
   }
 
   auto api = std::make_unique<NV_ENCODE_API_FUNCTION_LIST>();
-  api->version = NV_ENCODE_API_FUNCTION_LIST_VER;
+  api->version = nvenc_compat::FunctionListVersion();
   if (create_instance(api.get()) != NvencStatusForOk()) {
     RTC_LOG(LS_ERROR) << "NVENC: failed to create API instance";
     FreeLibrary(nvenc_dll);

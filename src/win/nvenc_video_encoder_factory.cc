@@ -17,6 +17,7 @@
 #include "ffnvcodec/nvEncodeAPI.h"
 #include "rtc_base/logging.h"
 #include "src/win/codecutils.h"
+#include "src/win/nvenc_api_compat.h"
 #include "src/win/nvenc_video_encoder.h"
 
 namespace owt {
@@ -39,7 +40,7 @@ bool CheckNvencAvailability() {
   }
 
   NV_ENCODE_API_FUNCTION_LIST api = {};
-  api.version = NV_ENCODE_API_FUNCTION_LIST_VER;
+  api.version = nvenc_compat::FunctionListVersion();
   if (create_instance(&api) != NV_ENC_SUCCESS) {
     FreeLibrary(nvenc_dll);
     return false;
@@ -58,10 +59,10 @@ bool CheckNvencAvailability() {
   }
 
   NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS open_params = {};
-  open_params.version = NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER;
+  open_params.version = nvenc_compat::OpenEncodeSessionExParamsVersion();
   open_params.device = device.Get();
   open_params.deviceType = NV_ENC_DEVICE_TYPE_DIRECTX;
-  open_params.apiVersion = NVENCAPI_VERSION;
+  open_params.apiVersion = nvenc_compat::kNvencApiVersion;
 
   void* encoder = nullptr;
   const NVENCSTATUS status =
