@@ -513,9 +513,12 @@ void RTCPeerConnectionImpl::SetLocalDescription(const string sdp,
                                        &error));
 
   if (!session_description) {
-    std::string error = "Can't parse received session description message.";
-    RTC_LOG(LS_WARNING) << error;
-    failure(error.c_str());
+    std::string error_msg =
+        "Can't parse received session description message. SdpParseError at "
+        "line \"" +
+        error.line + "\": " + error.description;
+    RTC_LOG(LS_WARNING) << error_msg;
+    failure(error_msg.c_str());
     return;
   }
   webrtc::scoped_refptr<webrtc::SetLocalDescriptionObserverInterface> observer =
@@ -531,7 +534,6 @@ void RTCPeerConnectionImpl::SetRemoteDescription(const string sdp,
                                                  OnSetSdpFailure failure) {
   RTC_LOG(LS_INFO) << " Received session description :" << to_std_string(sdp);
   webrtc::SdpParseError error;
-  webrtc::SdpParseError sdp_error;
   absl::optional<webrtc::SdpType> maybe_type =
       webrtc::SdpTypeFromString(type.std_string());
   if (!maybe_type) {
@@ -541,9 +543,12 @@ void RTCPeerConnectionImpl::SetRemoteDescription(const string sdp,
       webrtc::CreateSessionDescription(*maybe_type, sdp.std_string(), &error));
 
   if (!session_description) {
-    std::string error = "Can't parse received session description message.";
-    RTC_LOG(LS_WARNING) << error;
-    failure(error.c_str());
+    std::string error_msg =
+        "Can't parse received session description message. SdpParseError at "
+        "line \"" +
+        error.line + "\": " + error.description;
+    RTC_LOG(LS_WARNING) << error_msg;
+    failure(error_msg.c_str());
     return;
   }
 
