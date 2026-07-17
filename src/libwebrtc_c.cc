@@ -1,7 +1,9 @@
 #include "libwebrtc_c.h"
 
+#include <condition_variable>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <optional>
 #include <string>
@@ -122,6 +124,55 @@ struct lwrtc_video_source {
   libwebrtc::scoped_refptr<libwebrtc::RTCVideoSource> source;
 };
 
+// SetRates() copies its std::function before invoking it outside the encoder
+// lock. This bridge stays alive in that copied function and waits for any
+// invocation already in progress before its raw C user pointer can be freed.
+class RateCallbackBridge {
+ public:
+  RateCallbackBridge(lwrtc_rate_update_cb callback, void* user)
+      : callback_(callback), user_(user) {}
+
+  void Invoke(uint32_t bitrate_bps, uint32_t framerate_fps) {
+    lwrtc_rate_update_cb callback = nullptr;
+    void* user = nullptr;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (!active_ || !callback_) {
+        return;
+      }
+      ++in_flight_;
+      callback = callback_;
+      user = user_;
+    }
+
+    callback(user, bitrate_bps, framerate_fps);
+
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      --in_flight_;
+      if (in_flight_ == 0) {
+        idle_cv_.notify_all();
+      }
+    }
+  }
+
+  void DeactivateAndWait() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    active_ = false;
+    idle_cv_.wait(lock, [this]() { return in_flight_ == 0; });
+    callback_ = nullptr;
+    user_ = nullptr;
+  }
+
+ private:
+  std::mutex mutex_;
+  std::condition_variable idle_cv_;
+  lwrtc_rate_update_cb callback_ = nullptr;
+  void* user_ = nullptr;
+  bool active_ = true;
+  uint32_t in_flight_ = 0;
+};
+
 struct lwrtc_encoded_video_source {
   lwrtc_factory_t* factory = nullptr;
   lwrtc_video_codec_t codec = LWRTC_VIDEO_CODEC_H264;
@@ -129,6 +180,8 @@ struct lwrtc_encoded_video_source {
   int height = 0;
   lwrtc_keyframe_request_cb keyframe_cb = nullptr;
   void* keyframe_user = nullptr;
+  std::mutex rate_callback_mutex;
+  std::shared_ptr<RateCallbackBridge> rate_callback_bridge;
   // Capturer for pushing dummy frames to trigger encoder creation
   std::shared_ptr<PushVideoCapturer> capturer;
   bool encoder_ready = false;
@@ -412,6 +465,7 @@ lwrtc_peer_t* lwrtc_factory_create_peer(
   if (config) {
     rtc_config.offer_to_receive_audio = config->offer_to_receive_audio != 0;
     rtc_config.offer_to_receive_video = config->offer_to_receive_video != 0;
+    rtc_config.local_video_bandwidth = config->local_video_bandwidth_kbps;
   }
 
   libwebrtc::scoped_refptr<libwebrtc::RTCMediaConstraints> constraints_ref =
@@ -962,6 +1016,21 @@ lwrtc_encoded_video_source_t* lwrtc_encoded_video_source_create(
 }
 
 void lwrtc_encoded_video_source_release(lwrtc_encoded_video_source_t* source) {
+  if (!source) {
+    return;
+  }
+
+  // A copied SetRates callback may outlive this source. Mark the bridge
+  // inactive and wait for an invocation that already acquired its raw user
+  // pointer before deleting the source's owner-side reference.
+  std::shared_ptr<RateCallbackBridge> rate_callback_bridge;
+  {
+    std::lock_guard<std::mutex> lock(source->rate_callback_mutex);
+    rate_callback_bridge = std::move(source->rate_callback_bridge);
+  }
+  if (rate_callback_bridge) {
+    rate_callback_bridge->DeactivateAndWait();
+  }
   delete source;
 }
 
@@ -1050,11 +1119,11 @@ int lwrtc_encoded_video_source_push(
   if (!passthrough_factory) {
     return 0;
   }
-  auto* encoder = passthrough_factory->GetActiveEncoder();
-  if (!encoder) {
+  if (!passthrough_factory->HasActiveEncoder()) {
     // Encoder not yet created by WebRTC - push a dummy frame through the
     // capturer to trigger encoder creation
-    if (source->capturer && !source->encoder_ready) {
+    source->encoder_ready = false;
+    if (source->capturer) {
       // Create a black I420 frame to trigger the encoding pipeline
       auto i420_buffer = webrtc::I420Buffer::Create(source->width, source->height);
       // Fill with black (Y=0, U=128, V=128)
@@ -1088,7 +1157,11 @@ int lwrtc_encoded_video_source_push(
   frame.is_keyframe = is_keyframe != 0;
   frame.codec_type = ToWebrtcCodec(source->codec);
 
-  return encoder->PushEncodedFrame(frame) ? 1 : 0;
+  const bool pushed = passthrough_factory->PushEncodedFrame(frame);
+  if (!pushed) {
+    source->encoder_ready = false;
+  }
+  return pushed ? 1 : 0;
 }
 
 int lwrtc_encoded_video_source_push_shared(
@@ -1120,11 +1193,11 @@ int lwrtc_encoded_video_source_push_shared(
     }
     return 0;
   }
-  auto* encoder = passthrough_factory->GetActiveEncoder();
-  if (!encoder) {
+  if (!passthrough_factory->HasActiveEncoder()) {
     // Encoder not yet created by WebRTC - push a dummy frame through the
     // capturer to trigger encoder creation
-    if (source->capturer && !source->encoder_ready) {
+    source->encoder_ready = false;
+    if (source->capturer) {
       // Create a black I420 frame to trigger the encoding pipeline
       auto i420_buffer = webrtc::I420Buffer::Create(source->width, source->height);
       // Fill with black (Y=0, U=128, V=128)
@@ -1162,7 +1235,11 @@ int lwrtc_encoded_video_source_push_shared(
   frame.is_keyframe = is_keyframe != 0;
   frame.codec_type = ToWebrtcCodec(source->codec);
 
-  return encoder->PushEncodedFrame(frame) ? 1 : 0;
+  const bool pushed = passthrough_factory->PushEncodedFrame(frame);
+  if (!pushed) {
+    source->encoder_ready = false;
+  }
+  return pushed ? 1 : 0;
 }
 
 void lwrtc_encoded_video_source_set_keyframe_callback(
@@ -1190,6 +1267,44 @@ void lwrtc_encoded_video_source_set_keyframe_callback(
       }
     });
   }
+}
+
+void lwrtc_encoded_video_source_set_rate_callback(
+    lwrtc_encoded_video_source_t* source,
+    lwrtc_rate_update_cb cb,
+    void* user) {
+  if (!source) {
+    return;
+  }
+
+  std::lock_guard<std::mutex> lock(source->rate_callback_mutex);
+  if (source->rate_callback_bridge) {
+    source->rate_callback_bridge->DeactivateAndWait();
+    source->rate_callback_bridge.reset();
+  }
+
+  if (cb) {
+    source->rate_callback_bridge = std::make_shared<RateCallbackBridge>(cb, user);
+  }
+
+  // Retain a shared bridge in the passthrough factory too, because WebRTC can
+  // copy its callback before invoking it after the encoder lock is released.
+  if (!source->factory || !source->factory->handle) {
+    return;
+  }
+  auto* passthrough_factory = source->factory->passthrough_factory;
+  if (!passthrough_factory) {
+    return;
+  }
+  const auto bridge = source->rate_callback_bridge;
+  if (!bridge) {
+    passthrough_factory->SetRateUpdateCallback({});
+    return;
+  }
+  passthrough_factory->SetRateUpdateCallback(
+      [bridge](uint32_t bitrate_bps, uint32_t framerate_fps) {
+        bridge->Invoke(bitrate_bps, framerate_fps);
+      });
 }
 
 lwrtc_video_track_t* lwrtc_encoded_video_track_create(
@@ -1235,6 +1350,23 @@ lwrtc_video_track_t* lwrtc_encoded_video_track_create(
           cb_copy(user_copy);
         }
       });
+    }
+  }
+
+  // This mirrors the keyframe callback setup above and makes registration
+  // robust if a track is recreated after the source was configured.
+  std::shared_ptr<RateCallbackBridge> rate_callback_bridge;
+  {
+    std::lock_guard<std::mutex> lock(source->rate_callback_mutex);
+    rate_callback_bridge = source->rate_callback_bridge;
+  }
+  if (rate_callback_bridge) {
+    auto* passthrough_factory = factory->passthrough_factory;
+    if (passthrough_factory) {
+      passthrough_factory->SetRateUpdateCallback(
+          [rate_callback_bridge](uint32_t bitrate_bps, uint32_t framerate_fps) {
+            rate_callback_bridge->Invoke(bitrate_bps, framerate_fps);
+          });
     }
   }
 

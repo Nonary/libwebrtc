@@ -95,7 +95,10 @@ struct RTCConfiguration {
   // private
   bool use_rtp_mux = true;
   uint32_t local_audio_bandwidth = 128;
-  uint32_t local_video_bandwidth = 512;
+  // A zero value preserves the bandwidth negotiated by the remote offer. The
+  // old 512 kbps default overwrote every incoming video m-section, even when
+  // the application was producing a multi-megabit stream.
+  uint32_t local_video_bandwidth = 0;
 };
 
 struct SdpParseError {

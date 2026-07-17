@@ -34,6 +34,11 @@ struct EncodedFrameData {
 // Callback type for keyframe (IDR) requests triggered by PLI/FIR
 using KeyframeRequestCallback = std::function<void()>;
 
+// Callback type for transport congestion-controller target-rate changes. The
+// application owns the upstream encoder, so it applies this target outside of
+// the WebRTC encoder thread.
+using RateUpdateCallback = std::function<void(uint32_t, uint32_t)>;
+
 // Forward declaration
 class PassthroughVideoEncoderFactory;
 
@@ -76,6 +81,10 @@ class PassthroughVideoEncoder : public webrtc::VideoEncoder {
   // The callback should trigger an IDR request to the upstream encoder.
   void SetKeyframeRequestCallback(KeyframeRequestCallback callback);
 
+  // Set callback to be invoked when WebRTC changes the target bitrate or
+  // frame rate for this passthrough encoder.
+  void SetRateUpdateCallback(RateUpdateCallback callback);
+
   // Update dimensions (call when resolution changes)
   void SetDimensions(int width, int height);
 
@@ -106,6 +115,10 @@ class PassthroughVideoEncoder : public webrtc::VideoEncoder {
   uint32_t frame_rate_ = 30;
 
   KeyframeRequestCallback keyframe_request_cb_;
+  RateUpdateCallback rate_update_cb_;
+  // Protects the WebRTC-owned encode-complete callback from Release() while
+  // Sunshine injects an externally encoded frame on its media thread.
+  std::mutex callback_mutex_;
   std::mutex mutex_;
 
   // Cached parameter sets for H.264
@@ -150,12 +163,19 @@ class PassthroughVideoEncoderFactory : public webrtc::VideoEncoderFactory {
   void SetH265Parameters(std::optional<webrtc::CodecParameterMap> params);
   void SetAv1Parameters(std::optional<webrtc::CodecParameterMap> params);
 
-  // Get the currently active encoder instance (for frame injection)
-  // Returns nullptr if no encoder has been created yet.
-  PassthroughVideoEncoder* GetActiveEncoder();
+  // Query whether WebRTC has created an encoder for this factory yet.
+  bool HasActiveEncoder();
+
+  // Push through the active encoder while holding the factory lifetime lock.
+  // This avoids returning a raw encoder pointer that can be destroyed between
+  // lookup and frame injection during peer teardown.
+  bool PushEncodedFrame(const EncodedFrameData& frame);
 
   // Set the keyframe request callback for the active encoder
   void SetKeyframeRequestCallback(KeyframeRequestCallback callback);
+
+  // Set the congestion-controller rate callback for the active encoder.
+  void SetRateUpdateCallback(RateUpdateCallback callback);
 
   // Called by encoder when it's being destroyed
   void OnEncoderDestroyed(PassthroughVideoEncoder* encoder);
@@ -163,6 +183,7 @@ class PassthroughVideoEncoderFactory : public webrtc::VideoEncoderFactory {
  private:
   PassthroughVideoEncoder* active_encoder_ = nullptr;
   KeyframeRequestCallback pending_keyframe_cb_;
+  RateUpdateCallback pending_rate_update_cb_;
   std::optional<webrtc::VideoCodecType> preferred_codec_;
   std::optional<webrtc::CodecParameterMap> h265_parameters_;
   std::optional<webrtc::CodecParameterMap> av1_parameters_;

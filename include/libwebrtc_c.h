@@ -30,6 +30,9 @@ typedef enum lwrtc_video_codec {
 typedef struct lwrtc_config {
   int offer_to_receive_audio;
   int offer_to_receive_video;
+  // Optional bandwidth cap for the video m-section, in kbps. A zero value
+  // preserves the remote offer's negotiated value.
+  uint32_t local_video_bandwidth_kbps;
 } lwrtc_config_t;
 
 typedef void (*lwrtc_ice_cb)(
@@ -51,6 +54,14 @@ typedef void (*lwrtc_err_cb)(void* user, const char* error);
 
 // Callback for keyframe (IDR) requests triggered by PLI/FIR from receiver
 typedef void (*lwrtc_keyframe_request_cb)(void* user);
+
+// Callback for congestion-controller rate updates from the passthrough
+// encoder. The application must apply the target to its upstream encoder; it
+// must not block or reconfigure the encoder on this callback thread.
+typedef void (*lwrtc_rate_update_cb)(
+    void* user,
+    uint32_t bitrate_bps,
+    uint32_t framerate_fps);
 
 // Callback for releasing externally owned encoded frame buffers.
 // Called exactly once when WebRTC no longer needs the buffer (or immediately if
@@ -283,6 +294,13 @@ LIB_WEBRTC_API int lwrtc_encoded_video_source_push_shared(
 LIB_WEBRTC_API void lwrtc_encoded_video_source_set_keyframe_callback(
     lwrtc_encoded_video_source_t* source,
     lwrtc_keyframe_request_cb cb,
+    void* user);
+
+// Set the callback that receives WebRTC congestion-controller target rates.
+// It is valid to register this before the passthrough encoder exists.
+LIB_WEBRTC_API void lwrtc_encoded_video_source_set_rate_callback(
+    lwrtc_encoded_video_source_t* source,
+    lwrtc_rate_update_cb cb,
     void* user);
 
 // Create a video track from an encoded video source.

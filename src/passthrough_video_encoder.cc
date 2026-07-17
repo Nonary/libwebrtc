@@ -98,6 +98,12 @@ int PassthroughVideoEncoder::InitEncode(
     return WEBRTC_VIDEO_CODEC_ERROR;
   }
 
+  // The factory publishes this encoder before WebRTC calls InitEncode(). A
+  // media-thread injection can therefore arrive concurrently with setup. Use
+  // the same callback -> state lock order as PushEncodedFrame() so it cannot
+  // observe partially initialized dimensions or timestamp mapping state.
+  std::lock_guard<std::mutex> callback_lock(callback_mutex_);
+  std::lock_guard<std::mutex> state_lock(mutex_);
   width_ = codec_settings->width;
   height_ = codec_settings->height;
   target_bitrate_bps_ = codec_settings->startBitrate * 1000;
@@ -136,14 +142,34 @@ int PassthroughVideoEncoder::Encode(
 
 int PassthroughVideoEncoder::RegisterEncodeCompleteCallback(
     webrtc::EncodedImageCallback* callback) {
+  std::lock_guard<std::mutex> lock(callback_mutex_);
   callback_ = callback;
   return WEBRTC_VIDEO_CODEC_OK;
 }
 
 void PassthroughVideoEncoder::SetRates(const RateControlParameters& parameters) {
-  target_bitrate_bps_ = parameters.bitrate.get_sum_bps();
-  if (parameters.framerate_fps > 0) {
-    frame_rate_ = static_cast<uint32_t>(parameters.framerate_fps);
+  const uint32_t bitrate_bps = parameters.bitrate.get_sum_bps();
+  RateUpdateCallback callback;
+  uint32_t framerate_fps = 0;
+  bool changed = false;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    changed = target_bitrate_bps_ != bitrate_bps;
+    target_bitrate_bps_ = bitrate_bps;
+    if (parameters.framerate_fps > 0) {
+      const auto next_framerate = static_cast<uint32_t>(parameters.framerate_fps);
+      changed = changed || frame_rate_ != next_framerate;
+      frame_rate_ = next_framerate;
+    }
+    framerate_fps = frame_rate_;
+    callback = rate_update_cb_;
+  }
+
+  // The receiver of this callback can schedule an upstream encoder
+  // reconfiguration, so do not invoke it while holding the encoder lock or
+  // for duplicate targets.
+  if (changed && callback) {
+    callback(bitrate_bps, framerate_fps);
   }
 }
 
@@ -171,6 +197,7 @@ webrtc::VideoEncoder::EncoderInfo PassthroughVideoEncoder::GetEncoderInfo() cons
 }
 
 int PassthroughVideoEncoder::Release() {
+  std::lock_guard<std::mutex> callback_lock(callback_mutex_);
   callback_ = nullptr;
   cached_sps_.clear();
   cached_pps_.clear();
@@ -184,7 +211,12 @@ int PassthroughVideoEncoder::Release() {
 }
 
 bool PassthroughVideoEncoder::PushEncodedFrame(const EncodedFrameData& frame) {
-  if (!callback_) {
+  // Release() can run on the WebRTC teardown sequence while frame injection
+  // runs on Sunshine's media thread. Keep the callback valid through
+  // OnEncodedImage() instead of reading a raw pointer that Release can clear.
+  std::lock_guard<std::mutex> callback_lock(callback_mutex_);
+  auto* callback = callback_;
+  if (!callback) {
     RTC_LOG(LS_WARNING) << "PassthroughVideoEncoder: no callback registered";
     return false;
   }
@@ -268,7 +300,7 @@ bool PassthroughVideoEncoder::PushEncodedFrame(const EncodedFrameData& frame) {
   }
 
   // Send to WebRTC
-  auto result = callback_->OnEncodedImage(encoded_image, &codec_info);
+  auto result = callback->OnEncodedImage(encoded_image, &codec_info);
 
   if (result.error != webrtc::EncodedImageCallback::Result::Error::OK) {
     RTC_LOG(LS_WARNING) << "PassthroughVideoEncoder: OnEncodedImage returned error";
@@ -285,7 +317,17 @@ void PassthroughVideoEncoder::SetKeyframeRequestCallback(
   keyframe_request_cb_ = std::move(callback);
 }
 
+void PassthroughVideoEncoder::SetRateUpdateCallback(
+    RateUpdateCallback callback) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  rate_update_cb_ = std::move(callback);
+}
+
 void PassthroughVideoEncoder::SetDimensions(int width, int height) {
+  // Keep external resolution changes coherent with frame injection. This is
+  // intentionally protected by the callback gate, which PushEncodedFrame()
+  // already holds while it reads and emits dimensions.
+  std::lock_guard<std::mutex> callback_lock(callback_mutex_);
   width_ = width;
   height_ = height;
 }
@@ -593,9 +635,13 @@ std::unique_ptr<webrtc::VideoEncoder> PassthroughVideoEncoderFactory::Create(
     std::lock_guard<std::mutex> lock(mutex_);
     active_encoder_ = encoder.get();
 
-    // Apply pending keyframe callback if any
+    // Apply callbacks that may have been registered before WebRTC created the
+    // encoder. This is the common path for encoded sources.
     if (pending_keyframe_cb_) {
       active_encoder_->SetKeyframeRequestCallback(pending_keyframe_cb_);
+    }
+    if (pending_rate_update_cb_) {
+      active_encoder_->SetRateUpdateCallback(pending_rate_update_cb_);
     }
   }
 
@@ -639,9 +685,18 @@ void PassthroughVideoEncoderFactory::SetAv1Parameters(
   av1_parameters_ = std::move(params);
 }
 
-PassthroughVideoEncoder* PassthroughVideoEncoderFactory::GetActiveEncoder() {
+bool PassthroughVideoEncoderFactory::HasActiveEncoder() {
   std::lock_guard<std::mutex> lock(mutex_);
-  return active_encoder_;
+  return active_encoder_ != nullptr;
+}
+
+bool PassthroughVideoEncoderFactory::PushEncodedFrame(
+    const EncodedFrameData& frame) {
+  // Keep the factory lock for the complete call. OnEncoderDestroyed() takes
+  // this same lock before clearing the raw pointer, so the encoder cannot be
+  // destroyed after lookup and before PushEncodedFrame() dereferences it.
+  std::lock_guard<std::mutex> lock(mutex_);
+  return active_encoder_ && active_encoder_->PushEncodedFrame(frame);
 }
 
 void PassthroughVideoEncoderFactory::SetKeyframeRequestCallback(
@@ -652,6 +707,17 @@ void PassthroughVideoEncoderFactory::SetKeyframeRequestCallback(
   // Apply immediately if encoder already exists
   if (active_encoder_) {
     active_encoder_->SetKeyframeRequestCallback(pending_keyframe_cb_);
+  }
+}
+
+void PassthroughVideoEncoderFactory::SetRateUpdateCallback(
+    RateUpdateCallback callback) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  pending_rate_update_cb_ = std::move(callback);
+
+  // Apply immediately if encoder already exists.
+  if (active_encoder_) {
+    active_encoder_->SetRateUpdateCallback(pending_rate_update_cb_);
   }
 }
 
