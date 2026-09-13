@@ -42,6 +42,7 @@ typedef void (*lwrtc_ice_cb)(
     const char* candidate);
 typedef void (*lwrtc_data_channel_cb)(void* user, lwrtc_data_channel_t* channel);
 typedef void (*lwrtc_data_channel_state_cb)(void* user, int state);
+typedef void (*lwrtc_peer_state_cb)(void* user, int state);
 typedef void (*lwrtc_data_channel_message_cb)(
     void* user,
     const char* buffer,
@@ -74,6 +75,21 @@ typedef enum lwrtc_data_channel_state {
   LWRTC_DATA_CHANNEL_CLOSING = 2,
   LWRTC_DATA_CHANNEL_CLOSED = 3,
 } lwrtc_data_channel_state_t;
+
+typedef enum lwrtc_peer_state {
+  LWRTC_PEER_NEW = 0,
+  LWRTC_PEER_CONNECTING = 1,
+  LWRTC_PEER_CONNECTED = 2,
+  LWRTC_PEER_DISCONNECTED = 3,
+  LWRTC_PEER_FAILED = 4,
+  LWRTC_PEER_CLOSED = 5,
+} lwrtc_peer_state_t;
+
+// Passing a NULL callback waits for in-flight callbacks before returning. Callbacks must
+// schedule teardown rather than closing/releasing the peer or registering a
+// callback inline. Local close/release also unregisters this callback.
+LIB_WEBRTC_API void lwrtc_peer_register_state_callback(
+    lwrtc_peer_t* peer, lwrtc_peer_state_cb callback, void* user);
 
 LIB_WEBRTC_API int lwrtc_initialize();
 LIB_WEBRTC_API void lwrtc_terminate();

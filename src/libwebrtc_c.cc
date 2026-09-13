@@ -113,6 +113,9 @@ struct lwrtc_peer {
   void* ice_user = nullptr;
   lwrtc_data_channel_cb data_channel_cb = nullptr;
   void* data_channel_user = nullptr;
+  std::mutex state_callback_mutex;
+  lwrtc_peer_state_cb state_callback = nullptr;
+  void* state_callback_user = nullptr;
 };
 
 struct lwrtc_audio_source {
@@ -235,7 +238,35 @@ class PeerObserver final : public libwebrtc::RTCPeerConnectionObserver {
   explicit PeerObserver(lwrtc_peer* peer) : peer_(peer) {}
 
   void OnSignalingState(libwebrtc::RTCSignalingState) override {}
-  void OnPeerConnectionState(libwebrtc::RTCPeerConnectionState) override {}
+  void OnPeerConnectionState(libwebrtc::RTCPeerConnectionState state) override {
+    int value;
+    switch (state) {
+      case libwebrtc::RTCPeerConnectionStateNew:
+        value = LWRTC_PEER_NEW;
+        break;
+      case libwebrtc::RTCPeerConnectionStateConnecting:
+        value = LWRTC_PEER_CONNECTING;
+        break;
+      case libwebrtc::RTCPeerConnectionStateConnected:
+        value = LWRTC_PEER_CONNECTED;
+        break;
+      case libwebrtc::RTCPeerConnectionStateDisconnected:
+        value = LWRTC_PEER_DISCONNECTED;
+        break;
+      case libwebrtc::RTCPeerConnectionStateFailed:
+        value = LWRTC_PEER_FAILED;
+        break;
+      case libwebrtc::RTCPeerConnectionStateClosed:
+        value = LWRTC_PEER_CLOSED;
+        break;
+      default:
+        return;
+    }
+    std::lock_guard<std::mutex> lock(peer_->state_callback_mutex);
+    if (peer_->state_callback) {
+      peer_->state_callback(peer_->state_callback_user, value);
+    }
+  }
   void OnIceGatheringState(libwebrtc::RTCIceGatheringState) override {}
   void OnIceConnectionState(libwebrtc::RTCIceConnectionState) override {}
 
@@ -495,6 +526,7 @@ void lwrtc_peer_close(lwrtc_peer_t* peer) {
   if (!peer || !peer->handle) {
     return;
   }
+  lwrtc_peer_register_state_callback(peer, nullptr, nullptr);
   peer->handle->Close();
 }
 
@@ -502,6 +534,7 @@ void lwrtc_peer_release(lwrtc_peer_t* peer) {
   if (!peer) {
     return;
   }
+  lwrtc_peer_register_state_callback(peer, nullptr, nullptr);
   if (peer->handle && peer->observer) {
     peer->handle->DeRegisterRTCPeerConnectionObserver();
   }
@@ -608,6 +641,16 @@ void lwrtc_peer_add_candidate(
     return;
   }
   peer->handle->AddCandidate(mid, mline_index, candidate);
+}
+
+void lwrtc_peer_register_state_callback(
+    lwrtc_peer_t* peer, lwrtc_peer_state_cb callback, void* user) {
+  if (!peer) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(peer->state_callback_mutex);
+  peer->state_callback = callback;
+  peer->state_callback_user = user;
 }
 
 void lwrtc_peer_register_data_channel(
