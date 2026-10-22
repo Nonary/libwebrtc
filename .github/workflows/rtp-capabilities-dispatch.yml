@@ -1,0 +1,37 @@
+name: RTP capabilities dispatch
+
+on:
+  push:
+    paths:
+      - '.github/workflows/rtp-capabilities-dispatch.yml'
+      - 'src/rtc_peerconnection_factory_impl.cc'
+      - 'src/internal/media_type_utils.h'
+      - 'include/rtc_types.h'
+      - 'include/base/**'
+      - 'test/**'
+  pull_request:
+    paths:
+      - '.github/workflows/rtp-capabilities-dispatch.yml'
+      - 'src/rtc_peerconnection_factory_impl.cc'
+      - 'src/internal/media_type_utils.h'
+      - 'include/rtc_types.h'
+      - 'include/base/**'
+      - 'test/**'
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        flags:
+          - '-O2'
+          - '-O1 -fsanitize=address,undefined -fno-omit-frame-pointer'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run production capability methods
+        env:
+          CXXFLAGS: ${{ matrix.flags }}
+        run: python3 test/run_rtp_capabilities_dispatch_test.py
