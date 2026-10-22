@@ -378,7 +378,7 @@ RTCPeerConnectionFactoryImpl::GetRtpReceiverCapabilities(
   if (rtc::Thread::Current() != signaling_thread_.get()) {
     scoped_refptr<RTCRtpCapabilities> capabilities =
         signaling_thread_->BlockingCall([this, media_type] {
-          return GetRtpSenderCapabilities(media_type);
+          return GetRtpReceiverCapabilities(media_type);
         });
     return capabilities;
   }
