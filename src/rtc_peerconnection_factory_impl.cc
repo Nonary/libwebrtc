@@ -127,10 +127,17 @@ bool RTCPeerConnectionFactoryImpl::Terminate() {
 }
 
 void RTCPeerConnectionFactoryImpl::CreateAudioDeviceModule_w() {
-  if (!audio_device_module_)
+  if (audio_device_module_) return;
+
+  audio_device_module_ = webrtc::AudioDeviceModule::Create(
+      webrtc::AudioDeviceModule::kPlatformDefaultAudio,
+      task_queue_factory_.get());
+
+  // Headless hosts have no sound server and the voice engine aborts on a failed ADM init.
+  if (!audio_device_module_ || audio_device_module_->Init() != 0) {
     audio_device_module_ = webrtc::AudioDeviceModule::Create(
-        webrtc::AudioDeviceModule::kPlatformDefaultAudio,
-        task_queue_factory_.get());
+        webrtc::AudioDeviceModule::kDummyAudio, task_queue_factory_.get());
+  }
 }
 
 void RTCPeerConnectionFactoryImpl::DestroyAudioDeviceModule_w() {
